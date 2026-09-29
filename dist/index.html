@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>ORBYT — one tap, two orbits, no mercy</title>
+  <meta name="description" content="A one-tap arcade game. Switch orbits, dodge spikes, chain PERFECTs. Play the daily challenge and share your score.">
+  <meta name="theme-color" content="#0B0620">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="ORBYT">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" href="icon-192.png">
+  <link rel="apple-touch-icon" href="icon-192.png">
+
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="ORBYT — can you beat my score?">
+  <meta property="og:description" content="One tap. Two orbits. No mercy. Free in your browser — no download.">
+  <meta property="og:image" content="__SITE_URL__/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:url" content="__SITE_URL__/">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="ORBYT — can you beat my score?">
+  <meta name="twitter:description" content="One tap. Two orbits. No mercy.">
+  <meta name="twitter:image" content="__SITE_URL__/og.png">
+
+  <style>
+    :root { --bg: #0B0620; --cyan: #25F4EE; --pink: #FF2E63; }
+    html, body {
+      margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; background: var(--bg);
+      overscroll-behavior: none; touch-action: none; -webkit-user-select: none; user-select: none;
+      -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #fff;
+    }
+    #unity-canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; display: block; background: var(--bg); outline: none; }
+    #loader {
+      position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background: radial-gradient(circle at 50% 45%, #22104f 0%, var(--bg) 60%); z-index: 5; transition: opacity .5s ease;
+    }
+    #loader.done { opacity: 0; pointer-events: none; }
+    .orbit { position: relative; width: 180px; height: 180px; margin-bottom: 36px; }
+    .orbit .ring { position: absolute; border-radius: 50%; border: 2px solid rgba(123, 77, 255, .55); }
+    .orbit .r1 { inset: 30px; } .orbit .r2 { inset: 0; }
+    .orbit .core { position: absolute; inset: 66px; border-radius: 50%; background: #3b2380; box-shadow: 0 0 40px #7B4DFF, inset 0 0 0 2px #7B4DFF; animation: pulse .47s ease-out infinite; }
+    .orbit .dot { position: absolute; left: 50%; top: 0; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: #fff; box-shadow: 0 0 16px 4px var(--cyan); transform-origin: 8px 98px; animation: spin 1.1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes pulse { 0% { transform: scale(1.06); } 100% { transform: scale(1); } }
+    .logo { font-size: 64px; font-weight: 900; letter-spacing: 6px; position: relative; text-shadow: -4px 0 var(--cyan), 4px 0 var(--pink); }
+    .tag { opacity: .6; letter-spacing: 3px; font-size: 12px; margin-top: 8px; font-weight: 700; }
+    .bar { width: 220px; height: 6px; border-radius: 6px; background: rgba(255,255,255,.12); margin-top: 32px; overflow: hidden; }
+    .bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--cyan), #7B4DFF, var(--pink)); transition: width .2s; }
+    #err { display: none; max-width: 320px; text-align: center; margin-top: 20px; font-size: 14px; opacity: .8; line-height: 1.4; }
+    #toast {
+      position: fixed; left: 50%; bottom: calc(40px + env(safe-area-inset-bottom)); transform: translate(-50%, 20px);
+      background: #fff; color: #0B0620; font-weight: 800; padding: 12px 20px; border-radius: 999px; opacity: 0;
+      transition: all .25s ease; z-index: 10; pointer-events: none; font-size: 15px; white-space: nowrap;
+    }
+    #toast.show { opacity: 1; transform: translate(-50%, 0); }
+  </style>
+</head>
+<body>
+  <canvas id="unity-canvas" tabindex="-1"></canvas>
+  <div id="loader">
+    <div class="orbit"><div class="ring r2"></div><div class="ring r1"></div><div class="core"></div><div class="dot"></div></div>
+    <div class="logo">ORBYT</div>
+    <div class="tag">ONE TAP · TWO ORBITS · NO MERCY</div>
+    <div class="bar"><i id="fill"></i></div>
+    <div id="err"></div>
+  </div>
+  <div id="toast"></div>
+
+  <script>
+    (function () {
+      // Vercel Web Analytics (no-op until enabled on the project).
+      window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
+      window.orbytTrack = function (name, value) { try { window.va("event", { name: name, data: { value: value } }); } catch (e) {} };
+
+      var toastEl = document.getElementById("toast"), toastTimer;
+      window.orbytToast = function (msg) {
+        toastEl.textContent = msg; toastEl.classList.add("show");
+        clearTimeout(toastTimer); toastTimer = setTimeout(function () { toastEl.classList.remove("show"); }, 2200);
+      };
+
+      // Block browser gestures that fight a one-tap game.
+      ["gesturestart", "gesturechange", "contextmenu", "dblclick"].forEach(function (ev) {
+        document.addEventListener(ev, function (e) { e.preventDefault(); }, { passive: false });
+      });
+      document.addEventListener("touchmove", function (e) { e.preventDefault(); }, { passive: false });
+
+      var canvas = document.getElementById("unity-canvas");
+      var loader = document.getElementById("loader");
+      var fill = document.getElementById("fill");
+      var err = document.getElementById("err");
+      var isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.userAgent));
+
+      var buildUrl = "Build";
+      var config = {
+        arguments: [],
+        dataUrl: buildUrl + "/b387624272b4ab8d246428d4e31cb0bf.data.unityweb",
+        frameworkUrl: buildUrl + "/31538008ba02bd3f0c4f5c747c3bfeb0.framework.js.unityweb",
+        codeUrl: buildUrl + "/daf67632743ae265cee6625748ea2737.wasm.unityweb",
+        streamingAssetsUrl: "StreamingAssets",
+        autoSyncPersistentDataPath: true, // saves (best, shards, skins) persist to IndexedDB
+        companyName: "Orbyt",
+        productName: "ORBYT",
+        productVersion: "1.0.0",
+        // Cap render resolution — crisp on phones without melting them.
+        devicePixelRatio: Math.min(window.devicePixelRatio || 1, isMobile ? 2 : 2),
+        showBanner: function (msg, type) { if (type === "error") { err.style.display = "block"; err.textContent = msg; } console.warn(msg); }
+      };
+
+      var readyResolve;
+      window.orbytReady = function () { if (readyResolve) readyResolve(); };
+      var ready = new Promise(function (r) { readyResolve = r; setTimeout(r, 4000); });
+
+      var script = document.createElement("script");
+      script.src = buildUrl + "/f44e94d8ee8612f46100e30d721214d1.loader.js";
+      script.onload = function () {
+        createUnityInstance(canvas, config, function (p) {
+          fill.style.width = Math.round(10 + p * 90) + "%";
+        }).then(function (instance) {
+          window.orbyt = instance;
+          fill.style.width = "100%";
+          ready.then(function () { loader.classList.add("done"); canvas.focus(); window.orbytTrack("loaded", 0); });
+        }).catch(function (message) {
+          err.style.display = "block";
+          err.textContent = "Couldn't start the game: " + message + ". Try refreshing, or open in Chrome/Safari.";
+        });
+      };
+      document.body.appendChild(script);
+    })();
+  </script>
+  <script defer src="/_vercel/insights/script.js"></script>
+</body>
+</html>
