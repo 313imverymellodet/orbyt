@@ -5,11 +5,30 @@ One tap. Two orbits. No mercy. This is a Unity 6 WebGL arcade game made for mobi
 ## How it plays
 - **Tap anywhere** to switch between the inner and outer orbit and dodge the spikes.
 - **PERFECT:** dodge at the last moment to get bonus points. Chain them for combos (CLUTCH, INSANE, GODLIKE).
-- **FLIP:** every 20 points the orbit changes direction and the whole color palette shifts.
+- **FLIP:** every 25 points the orbit changes direction and the whole color palette shifts.
 - **Shards:** collect them to unlock 7 skins, including the animated PRISM skin.
 - **Daily Challenge:** everyone gets the same seeded course each day. The SHARE button creates a Wordle-style emoji card.
 
 There are no art or audio files. All sprites, sound effects and the synthwave soundtrack are generated in code at startup, which keeps the download small.
+
+## How to play (also shown in-game on first launch, and from the HOW TO PLAY button)
+- **Tap** anywhere to jump between the inner and outer orbit.
+- **Dodge** the spikes riding the rings. One touch ends the run.
+- **PERFECT:** switch at the last second for bonus points. Chain PERFECTs for combos.
+- **FLIP:** every 25 points the orbit reverses direction and the palette changes.
+- **Shards** unlock skins on the menu.
+- **DAILY:** one seeded course for everyone each day, ranked. **DUEL:** race a rival live.
+
+## Online features (Railway: `server/`)
+One Node service (`server.js` + `duel.js`) with Postgres, deployed with `railway up --service orbyt-api`.
+
+| Feature | How it works |
+|---|---|
+| Live leaderboard | `POST /api/run` starts a server-timed run, then `POST /api/score` validates and ranks it. `/live` WebSocket pushes new bests to open boards. Page overlay: `WebGLTemplates/Orbyt/lb.js` |
+| Duels | `/duel` WebSocket: Quick Match queue, private 4-letter rooms, invite links `?duel=CODE`, live state relay, overtake-to-win, rematch. Page lobby: `duel.js` |
+| Ghosts | Finished runs are stored as ghosts. Quick Match falls back to a ghost after 8s, or a practice bot on an empty server. |
+| Anti-cheat | Server-timed runs, max-score-per-second checks, one-time run tokens, rate limits, name filter |
+| Moderation | `POST /api/admin/remove {key, names:[...]}`. The key is in `ADMIN_KEY.txt` (git-ignored) and in the Railway `ADMIN_KEY` variable. |
 
 ## Layout
 ```

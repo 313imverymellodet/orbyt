@@ -1,3 +1,4 @@
+# Unity (regenerated on open)
 unity/[Ll]ibrary/
 unity/[Tt]emp/
 unity/[Oo]bj/
@@ -5,6 +6,15 @@ unity/[Ll]ogs/
 unity/[Uu]ser[Ss]ettings/
 unity/*.csproj
 unity/*.sln
+unity/*.slnx
 unity/.vs/
+unity/Packages/packages-lock.json
+# raw Kenney downloads (the assets the game uses are in unity/Assets/Resources)
+/kenney/
+# local tooling / logs / secrets
 *.log
+probe.txt
 .vercel
+ADMIN_KEY.txt
+node_modules/
+.env

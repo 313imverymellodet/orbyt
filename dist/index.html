@@ -98,9 +98,9 @@
       var buildUrl = "Build";
       var config = {
         arguments: [],
-        dataUrl: buildUrl + "/b387624272b4ab8d246428d4e31cb0bf.data.unityweb",
-        frameworkUrl: buildUrl + "/31538008ba02bd3f0c4f5c747c3bfeb0.framework.js.unityweb",
-        codeUrl: buildUrl + "/daf67632743ae265cee6625748ea2737.wasm.unityweb",
+        dataUrl: buildUrl + "/f2def50d1443fe19bdfba7876d48de77.data.unityweb",
+        frameworkUrl: buildUrl + "/06e1a387435deedd7d237d4bb0ba2199.framework.js.unityweb",
+        codeUrl: buildUrl + "/fd46272b0b36470ef6030da75e03fa7a.wasm.unityweb",
         streamingAssetsUrl: "StreamingAssets",
         autoSyncPersistentDataPath: true, // saves (best, shards, skins) persist to IndexedDB
         companyName: "Orbyt",
@@ -116,7 +116,7 @@
       var ready = new Promise(function (r) { readyResolve = r; setTimeout(r, 4000); });
 
       var script = document.createElement("script");
-      script.src = buildUrl + "/f44e94d8ee8612f46100e30d721214d1.loader.js";
+      script.src = buildUrl + "/8a6f0274603a02a6775117f125eacabf.loader.js";
       script.onload = function () {
         createUnityInstance(canvas, config, function (p) {
           fill.style.width = Math.round(10 + p * 90) + "%";
@@ -132,6 +132,8 @@
       document.body.appendChild(script);
     })();
   </script>
+  <script src="lb.js"></script>
+  <script src="duel.js"></script>
   <script defer src="/_vercel/insights/script.js"></script>
 </body>
 </html>

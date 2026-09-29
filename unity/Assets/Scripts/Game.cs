@@ -8,7 +8,7 @@ using UnityEngine.UI;
 public class Game : MonoBehaviour
 {
     enum State { Menu, Playing, Dead }
-    public enum Mode { Endless, Daily }
+    public enum Mode { Endless, Daily, Duel }
 
     // ---------- tuning ----------
     const float R_IN = 1.75f, R_OUT = 2.85f;
@@ -73,6 +73,19 @@ public class Game : MonoBehaviour
     readonly Stack<Ob> obPool = new Stack<Ob>();
 
     int score, best, level, nextFlip, combo, maxCombo, perfects, gemsRun, shards;
+    int lastRank, lastTotal;
+    Text dRank;
+
+    // ---- duel state (duel.js owns the socket; see OnDuel)
+    int duelSeed, oppScore, oppLane = 1, oppFinal;
+    string oppName = "";
+    float oppProgress, oppShown, oppRadius = R_OUT, duelSendT, oppFade;
+    bool oppAlive, duelGhost, duelBot, duelOver, passedSent;
+    string duelResult;
+    Transform rival; SpriteRenderer rivalCore, rivalGlow; TrailRenderer rivalTrail;
+    Text retryLabel;
+    RectTransform howUI;
+    static readonly Color RivalColor = new Color(1f, 0.31f, 0.85f);
     float comboTimer, deadTimer, runTime, attractSwapCooldown;
     bool newBest, tutorialDone;
     bool bot; float botReach = 0.8f;
@@ -102,6 +115,9 @@ public class Game : MonoBehaviour
     void Awake()
     {
         Application.targetFrameRate = -1;
+#if UNITY_WEBGL && !UNITY_EDITOR
+        WebGLInput.captureAllKeyboardInput = false;   // keys only when the canvas has focus, so the name box works
+#endif
         Input.multiTouchEnabled = true;
         cam = Camera.main;
         cam.orthographic = true;
@@ -126,7 +142,9 @@ public class Game : MonoBehaviour
         BuildWorld();
         BuildUI();
         ApplySkin(equipped);
+        CreateRival();
         EnterMenu();
+        if (PlayerPrefs.GetInt("howto", 0) == 0) ShowHowTo(true);
         WebBridge.Ready();
     }
 
@@ -310,7 +328,10 @@ public class Game : MonoBehaviour
         }, out muteLabel);
 
         Btn(menuUI, "PLAY", 80, BOT, new Vector2(0, 560), new Vector2(600, 180), white, Gfx.Hex("#0B0620"), () => StartRun(Mode.Endless), out _, 0.5f);
-        Btn(menuUI, "DAILY", 44, BOT, new Vector2(0, 385), new Vector2(600, 120), new Color(1, 1, 1, 0.14f), white, () => StartRun(Mode.Daily), out dailyLabel, 0.7f);
+        Btn(menuUI, "LEADERBOARD", 30, TR, new Vector2(-170, -190), new Vector2(300, 80), new Color(1, 1, 1, 0.12f), Gfx.Hex("#FFD447"), () => WebBridge.LBShow("daily"), out _, 0.8f);
+        Btn(menuUI, "DAILY", 36, BOT, new Vector2(-155, 385), new Vector2(290, 120), new Color(1, 1, 1, 0.14f), white, () => StartRun(Mode.Daily), out dailyLabel, 0.7f);
+        Btn(menuUI, "DUEL", 44, BOT, new Vector2(155, 385), new Vector2(290, 120), RivalColor, Gfx.Hex("#0B0620"), () => WebBridge.DuelOpen(), out _, 0.7f);
+        Btn(menuUI, "HOW TO PLAY", 26, TL, new Vector2(130, -190), new Vector2(200, 80), new Color(1, 1, 1, 0.12f), white, () => ShowHowTo(true), out _, 0.8f);
 
         Btn(menuUI, "<", 60, BOT, new Vector2(-240, 230), new Vector2(120, 120), new Color(1, 1, 1, 0.1f), white, () => CycleSkin(-1), out _, 0.7f);
         Btn(menuUI, ">", 60, BOT, new Vector2(240, 230), new Vector2(120, 120), new Color(1, 1, 1, 0.1f), white, () => CycleSkin(1), out _, 0.7f);
@@ -331,11 +352,19 @@ public class Game : MonoBehaviour
         dBest = Label(deadUI, "", 44, TOP, new Vector2(0, -850), dim);
         dStats = Label(deadUI, "", 36, TOP, new Vector2(0, -920), dim, FontStyle.Normal);
         dGems = Label(deadUI, "", 40, TOP, new Vector2(0, -990), Gfx.Hex("#25F4EE"));
+        dRank = Label(deadUI, "", 46, TOP, new Vector2(0, -1070), Gfx.Hex("#FFD447"));
 
-        Btn(deadUI, "RETRY", 80, BOT, new Vector2(0, 560), new Vector2(600, 180), white, Gfx.Hex("#0B0620"), () => StartRun(mode), out _, 0.5f);
+        Btn(deadUI, "RETRY", 80, BOT, new Vector2(0, 560), new Vector2(600, 180), white, Gfx.Hex("#0B0620"), () =>
+        {
+            if (mode != Mode.Duel) { StartRun(mode); return; }
+            if (!duelOver) return;
+            WebBridge.DuelRematch();
+            retryLabel.text = duelGhost ? "SEARCHING..." : "WAITING...";
+        }, out retryLabel, 0.5f);
         var share = Btn(deadUI, "SHARE SCORE", 46, BOT, new Vector2(0, 385), new Vector2(600, 120), Gfx.Hex("#25F4EE"), Gfx.Hex("#0B0620"), () => { }, out _, 0.7f);
         share.gameObject.AddComponent<ShareOnPress>().Text = ShareText;
-        Btn(deadUI, "HOME", 40, BOT, new Vector2(0, 235), new Vector2(300, 100), new Color(1, 1, 1, 0.12f), white, EnterMenu, out _, 0.8f);
+        Btn(deadUI, "HOME", 40, BOT, new Vector2(-160, 235), new Vector2(290, 100), new Color(1, 1, 1, 0.12f), white, () => { if (mode == Mode.Duel) WebBridge.DuelLeave(); EnterMenu(); }, out _, 0.8f);
+        Btn(deadUI, "RANKS", 40, BOT, new Vector2(160, 235), new Vector2(290, 100), new Color(1, 1, 1, 0.12f), Gfx.Hex("#FFD447"), () => WebBridge.LBShow(mode == Mode.Daily ? "daily" : "endless"), out _, 0.8f);
 
         // ---- overlay ----
         for (int i = 0; i < 8; i++)
@@ -346,6 +375,7 @@ public class Game : MonoBehaviour
             var sh = p.gameObject.AddComponent<Shadow>(); sh.effectColor = new Color(0, 0, 0, 0.5f); sh.effectDistance = new Vector2(3, -3);
             popups.Add(p); popupLife.Add(0); popupWorld.Add(Vector3.zero);
         }
+        BuildHowTo(root);
         flash = Fill("flash", root).gameObject.AddComponent<Image>();
         flash.color = new Color(1, 1, 1, 0); flash.raycastTarget = false;
     }
@@ -375,7 +405,7 @@ public class Game : MonoBehaviour
         ApplySkin(equipped = viewing);
         PlayerPrefs.SetInt("skin", equipped);
 
-        rng = m == Mode.Daily ? new System.Random(DailySeed()) : new System.Random(Environment.TickCount);
+        rng = m == Mode.Daily ? new System.Random(DailySeed()) : m == Mode.Duel ? new System.Random(duelSeed) : new System.Random(Environment.TickCount);
         ClearObstacles(false);
         Fx.I.ClearAll();
         state = State.Playing;
@@ -383,7 +413,7 @@ public class Game : MonoBehaviour
         nextFlip = FLIP_EVERY; newBest = false;
         dir = 1f; progress = 0; theta = Mathf.PI * 0.5f; lane = 1; radius = R_OUT; w = SpeedTarget();
         nextPos = tutorialDone ? 1.5f : 2.4f; // extra runway for first-timers
-        palIndex = m == Mode.Daily ? DailySeed() % Palettes.Length : 0;
+        palIndex = m == Mode.Daily ? DailySeed() % Palettes.Length : m == Mode.Duel ? duelSeed % Palettes.Length : 0;
         tgt = Palettes[palIndex];
         player.gameObject.SetActive(true);
         player.localPosition = Polar(theta, radius);
@@ -394,7 +424,9 @@ public class Game : MonoBehaviour
         deadUI.gameObject.SetActive(false);
         hudUI.gameObject.SetActive(true);
         tutText.gameObject.SetActive(!tutorialDone);
-        hudBest.text = "BEST " + CurrentBest();
+        hudBest.text = m == Mode.Duel ? "VS " + oppName : "BEST " + CurrentBest();
+        rival.gameObject.SetActive(m == Mode.Duel);
+        if (m == Mode.Duel) { oppProgress = oppShown = 0; oppScore = 0; oppAlive = true; oppFade = 1; oppLane = 1; oppRadius = R_OUT; rivalTrail.Clear(); duelOver = false; passedSent = false; duelResult = null; duelSendT = 0; dRank.text = ""; }
         scoreText.text = "0";
         comboText.text = "";
 
@@ -403,6 +435,9 @@ public class Game : MonoBehaviour
         Fx.I.Punch(0.6f);
         Fx.I.Shockwave(Vector3.zero, Gfx.A(Color.white, 0.6f), 9f, 0.6f);
         WebBridge.Event(m == Mode.Daily ? "start_daily" : "start", 0);
+        if (m != Mode.Duel) WebBridge.LBStart(m == Mode.Daily ? "daily" : "endless");
+        else Popup(Vector3.up * 1.6f, "GO!", RivalColor, 110);
+        lastRank = lastTotal = 0;
     }
 
     void Die(Vector3 at)
@@ -422,7 +457,7 @@ public class Game : MonoBehaviour
         Time.timeScale = 0.25f;
 
         int prev = CurrentBest();
-        if (score > prev)
+        if (mode != Mode.Duel && score > prev)
         {
             newBest = prev > 0;
             if (mode == Mode.Daily) PlayerPrefs.SetInt(DailyKey(), score);
@@ -432,6 +467,8 @@ public class Game : MonoBehaviour
         PlayerPrefs.SetInt("runs", PlayerPrefs.GetInt("runs", 0) + 1);
         PlayerPrefs.Save();
         WebBridge.Event(mode == Mode.Daily ? "death_daily" : "death", score);
+        if (mode == Mode.Duel) WebBridge.DuelDead(score);
+        else if (score > 0) WebBridge.LBSubmit(mode == Mode.Daily ? "daily" : "endless", score, perfects, level);
     }
 
     void ShowResults()
@@ -439,6 +476,7 @@ public class Game : MonoBehaviour
         deadUI.gameObject.SetActive(true);
         hudUI.gameObject.SetActive(false);
         dHead.text = mode == Mode.Daily ? "DAILY #" + DailyNum() : Taunt();
+        retryLabel.text = mode == Mode.Duel ? "REMATCH" : "RETRY";
         dHead.color = cur.accent;
         dScore.text = score.ToString();
         dNewBest.gameObject.SetActive(newBest);
@@ -446,7 +484,31 @@ public class Game : MonoBehaviour
         dStats.text = perfects == 0 && level == 0 ? "TIP: SWITCH AT THE LAST SECOND FOR PERFECTS"
             : perfects + " PERFECT   ·   x" + maxCombo + " COMBO   ·   " + level + " FLIP" + (level == 1 ? "" : "S");
         dGems.text = gemsRun > 0 ? "+" + gemsRun + " SHARDS" : "";
+        if (mode == Mode.Duel) { dNewBest.gameObject.SetActive(false); dBest.text = ""; ShowDuelResult(); }
+        else if (lastRank <= 0) dRank.text = "RANKING...";
         if (newBest) { Sfx.I.NewBest(); Flash(Gfx.Hex("#FFD447"), 0.3f); }
+    }
+
+    [System.Serializable] class RankMsg { public int rank, total, best; public bool newBest; public string error, mode; }
+
+    // Called from lb.js via SendMessage once the leaderboard service has ranked this run.
+    public void OnRank(string json)
+    {
+        var r = JsonUtility.FromJson<RankMsg>(json);
+        if (r == null || r.rank <= 0) { if (dRank) dRank.text = r != null && r.error == "offline" ? "LEADERBOARD OFFLINE" : ""; return; }
+        lastRank = r.rank; lastTotal = r.total;
+        string scope = mode == Mode.Daily ? "TODAY" : "ALL-TIME";
+        dRank.text = "#" + r.rank + " " + scope + "  ·  OF " + r.total;
+        dRank.color = r.rank <= 3 ? Gfx.Hex("#FFD447") : r.rank <= 10 ? Gfx.Hex("#25F4EE") : new Color(1, 1, 1, 0.8f);
+        if (r.rank <= 10) { Sfx.I.NewBest(); Flash(Gfx.Hex("#FFD447"), 0.25f); }
+        StartCoroutine(PopRank());
+    }
+
+    System.Collections.IEnumerator PopRank()
+    {
+        float k = 0;
+        while (k < 1f) { k += Time.unscaledDeltaTime / 0.35f; dRank.rectTransform.localScale = Vector3.one * Mathf.LerpUnclamped(0.4f, 1f, 1f + 2.7f * Mathf.Pow(k - 1f, 3) + 1.7f * Mathf.Pow(k - 1f, 2)); yield return null; }
+        dRank.rectTransform.localScale = Vector3.one;
     }
 
     string Taunt()
@@ -479,6 +541,7 @@ public class Game : MonoBehaviour
         {
             if (tapped) Swap();
             runTime += dt;
+            if (mode == Mode.Duel) DuelTick(dt);
             int steps = Mathf.CeilToInt(dt / 0.0125f);
             for (int s = 0; s < steps && state == State.Playing; s++) Step(dt / steps, false);
             comboTimer -= dt;
@@ -496,11 +559,12 @@ public class Game : MonoBehaviour
             Sfx.I.Music.pitch = Mathf.MoveTowards(Sfx.I.Music.pitch, 0.6f, Time.unscaledDeltaTime * 1.5f);
             Sfx.I.Music.volume = Mathf.MoveTowards(Sfx.I.Music.volume, 0.3f, Time.unscaledDeltaTime);
             if (deadTimer > 0.75f && !deadUI.gameObject.activeSelf) { Time.timeScale = 1; ShowResults(); Sfx.I.Music.pitch = 1f; }
-            if (deadUI.gameObject.activeSelf && deadTimer > 1.1f && (Input.GetKeyDown(KeyCode.Space) || Input.GetKeyDown(KeyCode.Return))) StartRun(mode);
+            if (mode != Mode.Duel && deadUI.gameObject.activeSelf && deadTimer > 1.1f && (Input.GetKeyDown(KeyCode.Space) || Input.GetKeyDown(KeyCode.Return))) StartRun(mode);
             UpdateObstacleVisuals(dt);
         }
 
         UpdateVisuals(dt);
+        UpdateRival(dt);
         UpdatePopups();
     }
 
@@ -833,7 +897,7 @@ public class Game : MonoBehaviour
                 flipArc.SetPosition(i, Polar(a, 1.42f));
             }
             flipArc.startColor = flipArc.endColor = Gfx.A(cur.accent, f > 0 ? 0.9f : 0f);
-            flipIn(nextFlip - score);
+            if (mode != Mode.Duel) flipIn(nextFlip - score);
         }
         else flipArc.positionCount = 0;
 
@@ -944,7 +1008,7 @@ public class Game : MonoBehaviour
         menuBest.text = best > 0 ? "BEST  " + best : "";
         shardText.text = shards.ToString();
         int db = PlayerPrefs.GetInt(DailyKey(), 0);
-        dailyLabel.text = "DAILY #" + DailyNum() + (db > 0 ? "   ·   BEST " + db : "   ·   NEW");
+        dailyLabel.text = "DAILY #" + DailyNum() + (db > 0 ? "\nBEST " + db : "");
         muteLabel.text = Sfx.I.Muted ? "SOUND OFF" : "SOUND ON";
         muteLabel.fontSize = 26;
 
@@ -968,6 +1032,8 @@ public class Game : MonoBehaviour
 
     string ShareText()
     {
+        if (mode == Mode.Duel && duelResult != null)
+            return (duelResult == "win" ? "\u2694\uFE0F I beat " : duelResult == "draw" ? "\u2694\uFE0F I tied " : "\u2694\uFE0F I lost to ") + oppName + " in an ORBYT duel " + score + "-" + oppFinal + "\nThink you can take me?";
         var sb = new System.Text.StringBuilder();
         sb.Append(mode == Mode.Daily ? "\U0001F300 ORBYT Daily #" + DailyNum() : "\U0001F300 ORBYT");
         sb.Append("\n");
@@ -981,7 +1047,181 @@ public class Game : MonoBehaviour
         if (maxCombo >= 3) sb.Append("  \U0001F525 x" + maxCombo);
         if (level > 0) sb.Append("  \U0001F504 " + level + " flip" + (level == 1 ? "" : "s"));
         sb.Append("\n");
+        if (lastRank > 0) sb.Append("\U0001F3C6 #" + lastRank + (mode == Mode.Daily ? " today" : " all-time") + " of " + lastTotal + "\n");
         sb.Append(score >= 40 ? "Bet you can't beat it." : "One tap. Harder than it looks.");
         return sb.ToString();
+    }
+
+    // ======================================================================
+    // Duels
+    [Serializable] class DuelMsg { public string t, opp, result; public int seed, score, you, lane, oppScore; public float progress; public bool ghost, bot; }
+
+    // Messages from duel.js (a live opponent or a ghost replay: Unity can't tell the difference).
+    public void OnDuel(string json)
+    {
+        var m = JsonUtility.FromJson<DuelMsg>(json);
+        if (m == null) return;
+        switch (m.t)
+        {
+            case "start":
+                duelSeed = m.seed; oppName = string.IsNullOrEmpty(m.opp) ? "RIVAL" : m.opp; duelGhost = m.ghost; duelBot = m.bot;
+                ShowHowTo(false);
+                StartRun(Mode.Duel);
+                if (duelGhost) Popup(Vector3.down * 1.4f, duelBot ? "PRACTICE BOT" : "GHOST RUN", new Color(1, 1, 1, 0.7f), 44);
+                break;
+            case "opp":
+                if (mode != Mode.Duel) break;
+                oppScore = m.score; oppProgress = m.progress; oppLane = m.lane;
+                break;
+            case "oppDead":
+                if (mode != Mode.Duel) break;
+                oppAlive = false; oppFinal = m.score; oppScore = m.score;
+                if (state == State.Playing)
+                {
+                    Fx.I.Burst(rival.position, RivalColor, 24, 6f, 0.18f, 0.7f);
+                    Popup(Vector3.up * 1.6f, oppName + " CRASHED!", RivalColor, 64);
+                    Sfx.I.Perfect(3);
+                }
+                break;
+            case "end":
+                if (mode != Mode.Duel) break;
+                duelOver = true; duelResult = m.result; oppFinal = m.oppScore;
+                if (state == State.Playing)
+                {
+                    // won while still flying: end the run in style, no crash
+                    state = State.Dead; deadTimer = 0.3f;
+                    Flash(Gfx.Hex("#FFD447"), 0.35f);
+                    Fx.I.Shockwave(player.position, Gfx.Hex("#FFD447"), 8f, 0.6f);
+                    Sfx.I.NewBest();
+                }
+                if (deadUI.gameObject.activeSelf) ShowDuelResult();
+                break;
+            case "left":
+                if (mode != Mode.Duel) break;
+                if (!duelOver) { duelOver = true; duelResult = "win"; oppFinal = oppScore; }
+                oppAlive = false;
+                Popup(Vector3.up * 1.6f, oppName + " LEFT", new Color(1, 1, 1, 0.8f), 52);
+                if (deadUI.gameObject.activeSelf) { ShowDuelResult(); dRank.text = oppName + " LEFT THE MATCH"; }
+                break;
+            case "rematchAsk":
+                if (deadUI.gameObject.activeSelf) { dRank.text = oppName + " WANTS A REMATCH!"; dRank.color = RivalColor; }
+                break;
+        }
+    }
+
+    void DuelTick(float dt)
+    {
+        duelSendT -= Time.unscaledDeltaTime;
+        if (duelSendT <= 0)
+        {
+            duelSendT = 0.1f;
+            WebBridge.DuelState(score, progress, lane);
+        }
+        if (!oppAlive && !passedSent && score > oppFinal)
+        {
+            passedSent = true;
+            WebBridge.DuelPassed(score);
+            Popup(Vector3.up * 1.6f, "YOU PASSED " + oppName + "!", Gfx.Hex("#FFD447"), 60);
+        }
+        hudBest.text = "VS " + oppName + "   " + oppScore;
+        int diff = score - oppScore;
+        flipInText.text = !oppAlive ? (score > oppFinal ? "YOU WIN!" : "BEAT " + (oppFinal + 1) + " TO WIN") : diff > 0 ? "+" + diff + " AHEAD" : diff < 0 ? (-diff) + " BEHIND" : "TIED";
+        flipInText.color = !oppAlive || diff > 0 ? Gfx.Hex("#7CFF6B") : diff < 0 ? RivalColor : new Color(1, 1, 1, 0.7f);
+    }
+
+    void ShowDuelResult()
+    {
+        dStats.text = "YOU " + score + "   ·   " + (duelOver ? oppFinal : oppScore) + " " + oppName;
+        dGems.text = "";
+        if (!duelOver)
+        {
+            dHead.text = "WAITING FOR " + oppName + "...";
+            dHead.color = new Color(1, 1, 1, 0.8f);
+            dRank.text = oppAlive ? oppName + " IS STILL FLYING (" + oppScore + ")" : "";
+            dRank.color = RivalColor;
+            return;
+        }
+        dHead.text = duelResult == "win" ? "YOU WIN!" : duelResult == "draw" ? "DRAW!" : "DEFEATED";
+        dHead.color = duelResult == "win" ? Gfx.Hex("#FFD447") : duelResult == "draw" ? Gfx.Hex("#25F4EE") : RivalColor;
+        if (dRank.text.IndexOf("REMATCH", StringComparison.Ordinal) < 0 && dRank.text.IndexOf("LEFT", StringComparison.Ordinal) < 0)
+            dRank.text = duelGhost ? (duelBot ? "vs PRACTICE BOT" : "vs " + oppName + "'s GHOST RUN") : "LIVE DUEL";
+        dRank.color = new Color(1, 1, 1, 0.6f);
+        retryLabel.text = duelGhost ? "FIND RIVAL" : "REMATCH";
+        if (duelResult == "win") { Flash(Gfx.Hex("#FFD447"), 0.3f); Sfx.I.NewBest(); }
+    }
+
+    void CreateRival()
+    {
+        rival = new GameObject("Rival").transform;
+        rival.SetParent(transform, false);
+        rivalGlow = Spr("glow", sGlow, 1.4f, 18, true, rival);
+        rivalCore = Spr("core", sCircle, 0.3f, 19, false, rival);
+        rivalTrail = rival.gameObject.AddComponent<TrailRenderer>();
+        rivalTrail.sharedMaterial = matAdd ? matAdd : matAlpha;
+        rivalTrail.time = 0.3f; rivalTrail.minVertexDistance = 0.05f;
+        rivalTrail.widthCurve = new AnimationCurve(new Keyframe(0, 0.22f), new Keyframe(1, 0f));
+        rivalTrail.sortingOrder = 17;
+        rival.gameObject.SetActive(false);
+    }
+
+    void UpdateRival(float dt)
+    {
+        if (!rival.gameObject.activeSelf) return;
+        if (mode != Mode.Duel || state == State.Menu) { rival.gameObject.SetActive(false); return; }
+        // ease toward the latest network sample, drifting forward between packets
+        oppShown = Mathf.Lerp(oppShown + (oppAlive && state == State.Playing ? w * dt : 0), oppProgress, 1f - Mathf.Exp(-dt * 6f));
+        oppRadius = Mathf.Lerp(oppRadius, Lanes[Mathf.Clamp(oppLane, 0, 1)], 1f - Mathf.Exp(-dt * 20f));
+        float ang = theta + dir * (oppShown - progress);
+        rival.localPosition = Polar(ang, oppRadius);
+        oppFade = Mathf.MoveTowards(oppFade, oppAlive ? 1f : 0.15f, dt * 2f);
+        rivalCore.color = Gfx.A(Color.Lerp(RivalColor, Color.white, 0.3f), oppFade);
+        rivalGlow.color = Gfx.A(RivalColor, 0.6f * oppFade);
+        rivalTrail.startColor = Gfx.A(RivalColor, 0.7f * oppFade);
+        rivalTrail.endColor = Gfx.A(RivalColor, 0f);
+    }
+
+    // ======================================================================
+    // How to play
+    void BuildHowTo(Transform root)
+    {
+        howUI = Fill("HowTo", root);
+        var shade = howUI.gameObject.AddComponent<Image>();
+        shade.color = new Color(0.02f, 0.01f, 0.08f, 0.94f);
+        Vector2 TOP = new Vector2(0.5f, 1), BOT = new Vector2(0.5f, 0);
+        Label(howUI, "HOW TO PLAY", 84, TOP, new Vector2(0, -230), Color.white);
+        var rows = new (string title, string body, Color c, int icon)[]
+        {
+            ("TAP", "Tap anywhere to jump between the inner and outer orbit.", Color.white, 0),
+            ("DODGE", "Spikes ride the rings. Touch one and your run is over.", Gfx.Hex("#FF2E63"), 1),
+            ("PERFECT", "Switch at the last second for a PERFECT. Chain them for combo points.", Gfx.Hex("#25F4EE"), 1),
+            ("FLIP", "Every 25 points the orbit reverses direction and the colors change.", Gfx.Hex("#FFD447"), 2),
+            ("SHARDS", "Grab shards to unlock new skins on the menu.", Gfx.Hex("#7CFF6B"), 1),
+            ("MODES", "DAILY: one course for everyone, ranked. DUEL: race a rival live.", RivalColor, 2),
+        };
+        for (int i = 0; i < rows.Length; i++)
+        {
+            float y = -380 - i * 170;
+            var r = rows[i];
+            var iconRt = Rect("icon", howUI, TOP, new Vector2(-400, y - 20), new Vector2(64, 64));
+            var img = iconRt.gameObject.AddComponent<Image>();
+            img.sprite = r.icon == 1 ? sSquare : r.icon == 2 ? sRing : sCircle;
+            img.color = r.c; img.raycastTarget = false;
+            if (r.icon == 1) iconRt.localRotation = Quaternion.Euler(0, 0, 45);
+            if (r.icon == 2) iconRt.sizeDelta = new Vector2(84, 84);
+            var t = Label(howUI, r.title, 44, TOP, new Vector2(40, y), r.c);
+            t.alignment = TextAnchor.MiddleLeft; t.rectTransform.sizeDelta = new Vector2(720, 60);
+            var b = Label(howUI, r.body, 32, TOP, new Vector2(40, y - 70), new Color(1, 1, 1, 0.75f), FontStyle.Normal);
+            b.alignment = TextAnchor.UpperLeft; b.horizontalOverflow = HorizontalWrapMode.Wrap;
+            b.rectTransform.sizeDelta = new Vector2(720, 90);
+        }
+        Btn(howUI, "GOT IT", 64, BOT, new Vector2(0, 220), new Vector2(560, 160), Color.white, Gfx.Hex("#0B0620"), () => ShowHowTo(false), out _, 0.5f);
+        howUI.gameObject.SetActive(false);
+    }
+
+    void ShowHowTo(bool on)
+    {
+        if (!howUI) return;
+        howUI.gameObject.SetActive(on);
+        if (!on) { PlayerPrefs.SetInt("howto", 1); PlayerPrefs.Save(); }
     }
 }

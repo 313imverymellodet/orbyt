@@ -41,6 +41,17 @@ mergeInto(LibraryManager.library, {
     if (window.orbytTrack) window.orbytTrack(name, value);
   },
 
+  OrbytLBStart: function (modePtr) { if (window.orbytLB) window.orbytLB.start(UTF8ToString(modePtr)); },
+  OrbytLBSubmit: function (modePtr, score, perfects, flips) { if (window.orbytLB) window.orbytLB.submit(UTF8ToString(modePtr), score, perfects, flips); },
+  OrbytLBShow: function (modePtr) { if (window.orbytLB) window.orbytLB.show(UTF8ToString(modePtr)); },
+
+  OrbytDuelOpen: function () { if (window.orbytDuel) window.orbytDuel.open(); },
+  OrbytDuelState: function (score, progress, lane) { if (window.orbytDuel) window.orbytDuel.state(score, progress, lane); },
+  OrbytDuelDead: function (score) { if (window.orbytDuel) window.orbytDuel.dead(score); },
+  OrbytDuelPassed: function (score) { if (window.orbytDuel) window.orbytDuel.passed(score); },
+  OrbytDuelRematch: function () { if (window.orbytDuel) window.orbytDuel.rematch(); },
+  OrbytDuelLeave: function () { if (window.orbytDuel) window.orbytDuel.leave(); },
+
   OrbytReady: function () {
     if (window.orbytReady) window.orbytReady();
   }

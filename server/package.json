@@ -1,0 +1,10 @@
+{
+  "name": "orbyt-leaderboard",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "server.js",
+  "engines": { "node": ">=20" },
+  "scripts": { "start": "node server.js" },
+  "dependencies": { "pg": "^8.13.0", "ws": "^8.18.0" }
+}
