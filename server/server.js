@@ -12,6 +12,7 @@ import { handleDuel, duelStats } from "./duel.js";
 import { initRace, raceHttp, raceRemove, handleRace, raceStats } from "./race.js";
 import { initKitchen, kitchenHttp, kitchenRemove, handleKitchen, kitchenStats } from "./kitchen.js";
 import { initBrawl, brawlHttp, brawlRemove, handleBrawl, brawlStats } from "./brawl.js";
+import { initObby, obbyHttp, obbyRemove, handleObby, obbyStats } from "./obby.js";
 
 const PORT = process.env.PORT || 3000;
 const db = new pg.Pool({
@@ -37,6 +38,7 @@ await db.query(`
 await initRace(db);
 await initKitchen(db);
 await initBrawl(db);
+await initObby(db);
 
 // ---------------------------------------------------------------- helpers
 const today = () => { const d = new Date(); return d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate(); };
@@ -85,11 +87,12 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") { res.writeHead(204); return res.end(); }
   const url = new URL(req.url, "http://x");
   try {
-    if (url.pathname === "/" || url.pathname === "/health") return send(res, 200, { ok: true, service: "orbyt-leaderboard", day: today(), duels: duelStats(), race: raceStats(), kitchen: kitchenStats(), brawl: brawlStats() });
+    if (url.pathname === "/" || url.pathname === "/health") return send(res, 200, { ok: true, service: "orbyt-leaderboard", day: today(), duels: duelStats(), race: raceStats(), kitchen: kitchenStats(), brawl: brawlStats(), obby: obbyStats() });
 
     if (await raceHttp(req, res, url, { send, readJson, cleanName, ipOf, broadcast })) return;
     if (await kitchenHttp(req, res, url, { send, readJson, cleanName, ipOf, broadcast })) return;
     if (await brawlHttp(req, res, url, { send })) return;
+    if (await obbyHttp(req, res, url, { send, cleanName, ipOf, broadcast })) return;
 
     if (url.pathname === "/api/run" && req.method === "POST") {
       const token = crypto.randomBytes(16).toString("hex");
@@ -159,7 +162,7 @@ const server = http.createServer(async (req, res) => {
       const names = Array.isArray(b.names) ? b.names.map((n) => String(n).toUpperCase()) : [];
       const prefix = b.playerPrefix ? String(b.playerPrefix) + "%" : null;
       const r = await db.query("DELETE FROM scores WHERE name = ANY($1) OR ($2::text IS NOT NULL AND player LIKE $2)", [names, prefix]);
-      return send(res, 200, { removed: r.rowCount, raceRemoved: await raceRemove(names, prefix), kitchenRemoved: await kitchenRemove(names, prefix), brawlRemoved: await brawlRemove(names, prefix) });
+      return send(res, 200, { removed: r.rowCount, raceRemoved: await raceRemove(names, prefix), kitchenRemoved: await kitchenRemove(names, prefix), brawlRemoved: await brawlRemove(names, prefix), obbyRemoved: await obbyRemove(names, prefix) });
     }
 
     send(res, 404, { error: "not found" });
@@ -180,9 +183,11 @@ const kitchenWss = new WebSocketServer({ noServer: true, maxPayload: 16384 });
 kitchenWss.on("connection", handleKitchen);
 const brawlWss = new WebSocketServer({ noServer: true, maxPayload: 8192 });
 brawlWss.on("connection", (ws, req) => handleBrawl(ws, req, cleanName));
+const obbyWss = new WebSocketServer({ noServer: true, maxPayload: 2048 });
+obbyWss.on("connection", handleObby);
 server.on("upgrade", (req, socket, head) => {
   const path = new URL(req.url, "http://x").pathname;
-  const target = path === "/live" ? wss : path === "/duel" ? duelWss : path === "/race" ? raceWss : path === "/kitchen" ? kitchenWss : path === "/brawl" ? brawlWss : null;
+  const target = path === "/live" ? wss : path === "/duel" ? duelWss : path === "/race" ? raceWss : path === "/kitchen" ? kitchenWss : path === "/brawl" ? brawlWss : path === "/obby" ? obbyWss : null;
   if (!target) return socket.destroy();
   target.handleUpgrade(req, socket, head, (ws) => target.emit("connection", ws, req));
 });
