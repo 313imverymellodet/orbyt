@@ -5,7 +5,7 @@
 //   - count a win when every human in the room reports the same winner.
 import crypto from "node:crypto";
 
-const STAGES = 4, MAX = 4;
+const STAGES = 5, MAX = 4;
 let db = null;
 
 export async function initBrawl(pool) {
@@ -148,7 +148,7 @@ export function handleBrawl(ws, req, cleanName) {
     switch (m.t) {
       case "hello": {
         p.name = (cleanName && cleanName(m.name)) || "BRAWLER";
-        p.ch = Math.max(0, Math.min(9, Math.floor(Number(m.ch)) || 0));
+        p.ch = Math.max(0, Math.min(39, Math.floor(Number(m.ch)) || 0));
         const pid = String(m.player || "").replace(/[^a-f0-9-]/gi, "").slice(0, 40);
         p.pid = pid.length >= 8 ? pid : null;
         break;
