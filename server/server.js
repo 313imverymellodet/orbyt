@@ -13,6 +13,7 @@ import { initRace, raceHttp, raceRemove, handleRace, raceStats } from "./race.js
 import { initKitchen, kitchenHttp, kitchenRemove, handleKitchen, kitchenStats } from "./kitchen.js";
 import { initBrawl, brawlHttp, brawlRemove, handleBrawl, brawlStats } from "./brawl.js";
 import { initObby, obbyHttp, obbyRemove, handleObby, obbyStats } from "./obby.js";
+import { initSnack, snackHttp, snackRemove } from "./snack.js";
 
 const PORT = process.env.PORT || 3000;
 const db = new pg.Pool({
@@ -39,6 +40,7 @@ await initRace(db);
 await initKitchen(db);
 await initBrawl(db);
 await initObby(db);
+await initSnack(db);
 
 // ---------------------------------------------------------------- helpers
 const today = () => { const d = new Date(); return d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate(); };
@@ -93,6 +95,7 @@ const server = http.createServer(async (req, res) => {
     if (await kitchenHttp(req, res, url, { send, readJson, cleanName, ipOf, broadcast })) return;
     if (await brawlHttp(req, res, url, { send })) return;
     if (await obbyHttp(req, res, url, { send, cleanName, ipOf, broadcast })) return;
+    if (await snackHttp(req, res, url, { send, readJson, cleanName, ipOf, broadcast })) return;
 
     if (url.pathname === "/api/run" && req.method === "POST") {
       const token = crypto.randomBytes(16).toString("hex");
@@ -162,7 +165,7 @@ const server = http.createServer(async (req, res) => {
       const names = Array.isArray(b.names) ? b.names.map((n) => String(n).toUpperCase()) : [];
       const prefix = b.playerPrefix ? String(b.playerPrefix) + "%" : null;
       const r = await db.query("DELETE FROM scores WHERE name = ANY($1) OR ($2::text IS NOT NULL AND player LIKE $2)", [names, prefix]);
-      return send(res, 200, { removed: r.rowCount, raceRemoved: await raceRemove(names, prefix), kitchenRemoved: await kitchenRemove(names, prefix), brawlRemoved: await brawlRemove(names, prefix), obbyRemoved: await obbyRemove(names, prefix) });
+      return send(res, 200, { removed: r.rowCount, raceRemoved: await raceRemove(names, prefix), kitchenRemoved: await kitchenRemove(names, prefix), brawlRemoved: await brawlRemove(names, prefix), obbyRemoved: await obbyRemove(names, prefix), snackRemoved: await snackRemove(names, prefix) });
     }
 
     send(res, 404, { error: "not found" });
