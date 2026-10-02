@@ -61,6 +61,30 @@
   </style>
 </head>
 <body>
+  <script>
+    // First-party analytics: anonymous daily event counts on the shared game server (no personal data).
+    (function () {
+      var G = "orbyt", API = new URLSearchParams(location.search).get("api") || "https://orbyt-api-production-29f6.up.railway.app";
+      var q = [], uid;
+      try { uid = localStorage.getItem("ev_uid"); if (!uid) { uid = Math.random().toString(36).slice(2, 12) + Date.now().toString(36); localStorage.setItem("ev_uid", uid); } } catch (e) { uid = Math.random().toString(36).slice(2, 14); }
+      function flush() {
+        if (!q.length) return;
+        var body = JSON.stringify({ g: G, s: uid, e: q.splice(0, 60) });
+        try { if (navigator.sendBeacon && navigator.sendBeacon(API + "/api/ev", body)) return; } catch (e) {}
+        try { fetch(API + "/api/ev", { method: "POST", body: body, keepalive: true }); } catch (e) {}
+      }
+      window.__ev = function (name, value) {
+        q.push([String(name).toLowerCase().replace(/[^a-z0-9_]/g, "_").slice(0, 40), Math.round(Number(value) || 0)]);
+        if (q.length >= 40) flush();
+      };
+      setInterval(flush, 15000);
+      addEventListener("pagehide", flush);
+      document.addEventListener("visibilitychange", function () { if (document.hidden) flush(); });
+      window.__ev("page_view", 0);
+      if (document.referrer) try { window.__ev("ref_" + new URL(document.referrer).hostname.replace(/^www\./, "").split(".")[0], 0); } catch (e) {}
+    })();
+  </script>
+
   <canvas id="unity-canvas" tabindex="-1"></canvas>
   <div id="loader">
     <div class="orbit"><div class="ring r2"></div><div class="ring r1"></div><div class="core"></div><div class="dot"></div></div>
@@ -74,8 +98,7 @@
   <script>
     (function () {
       // Vercel Web Analytics (no-op until enabled on the project).
-      window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
-      window.orbytTrack = function (name, value) { try { window.va("event", { name: name, data: { value: value } }); } catch (e) {} };
+      window.orbytTrack = function (name, value) { try { window.__ev && window.__ev(name, value); } catch (e) {} };
 
       var toastEl = document.getElementById("toast"), toastTimer;
       window.orbytToast = function (msg) {
@@ -98,9 +121,9 @@
       var buildUrl = "Build";
       var config = {
         arguments: [],
-        dataUrl: buildUrl + "/f2def50d1443fe19bdfba7876d48de77.data.unityweb",
+        dataUrl: buildUrl + "/6397601e18e902e0557f0bfb61f0e0e6.data.unityweb",
         frameworkUrl: buildUrl + "/06e1a387435deedd7d237d4bb0ba2199.framework.js.unityweb",
-        codeUrl: buildUrl + "/fd46272b0b36470ef6030da75e03fa7a.wasm.unityweb",
+        codeUrl: buildUrl + "/91f01ddf121499ce70c18e09266462ff.wasm.unityweb",
         streamingAssetsUrl: "StreamingAssets",
         autoSyncPersistentDataPath: true, // saves (best, shards, skins) persist to IndexedDB
         companyName: "Orbyt",
@@ -134,6 +157,5 @@
   </script>
   <script src="lb.js"></script>
   <script src="duel.js"></script>
-  <script defer src="/_vercel/insights/script.js"></script>
 </body>
 </html>

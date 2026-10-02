@@ -14,6 +14,7 @@ import { initKitchen, kitchenHttp, kitchenRemove, handleKitchen, kitchenStats } 
 import { initBrawl, brawlHttp, brawlRemove, handleBrawl, brawlStats } from "./brawl.js";
 import { initObby, obbyHttp, obbyRemove, handleObby, obbyStats } from "./obby.js";
 import { initSnack, snackHttp, snackRemove } from "./snack.js";
+import { initAnalytics, analyticsHttp } from "./analytics.js";
 
 const PORT = process.env.PORT || 3000;
 const db = new pg.Pool({
@@ -41,6 +42,7 @@ await initKitchen(db);
 await initBrawl(db);
 await initObby(db);
 await initSnack(db);
+await initAnalytics(db);
 
 // ---------------------------------------------------------------- helpers
 const today = () => { const d = new Date(); return d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate(); };
@@ -96,6 +98,7 @@ const server = http.createServer(async (req, res) => {
     if (await brawlHttp(req, res, url, { send })) return;
     if (await obbyHttp(req, res, url, { send, cleanName, ipOf, broadcast })) return;
     if (await snackHttp(req, res, url, { send, readJson, cleanName, ipOf, broadcast })) return;
+    if (await analyticsHttp(req, res, url, { send, ipOf })) return;
 
     if (url.pathname === "/api/run" && req.method === "POST") {
       const token = crypto.randomBytes(16).toString("hex");

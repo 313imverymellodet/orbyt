@@ -126,7 +126,7 @@ public class Game : MonoBehaviour
         matAdd = Resources.Load<Material>("OrbytAlpha"); // alpha glow reads better than additive on WebGL
         matAlpha = Resources.Load<Material>("OrbytAlpha");
         sCircle = Gfx.Circle(); sGlow = Gfx.Glow(); sRing = Gfx.Ring(); sSquare = Gfx.Square(); sRound = Gfx.RoundedUI();
-        font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        font = Resources.Load<Font>("Fonts/LilitaOne") ?? Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");   // Lilita One, SIL OFL 1.1
 
         gameObject.AddComponent<Sfx>();
         var fx = new GameObject("Fx").AddComponent<Fx>();
@@ -243,7 +243,7 @@ public class Game : MonoBehaviour
         return rt;
     }
 
-    Text Label(Transform parent, string s, int size, Vector2 anchor, Vector2 pos, Color c, FontStyle st = FontStyle.Bold)
+    Text Label(Transform parent, string s, int size, Vector2 anchor, Vector2 pos, Color c, FontStyle st = FontStyle.Normal)
     {
         var rt = Rect("txt", parent, anchor, pos, new Vector2(1000, size * 1.5f));
         var t = rt.gameObject.AddComponent<Text>();
@@ -468,7 +468,7 @@ public class Game : MonoBehaviour
         PlayerPrefs.Save();
         WebBridge.Event(mode == Mode.Daily ? "death_daily" : "death", score);
         if (mode == Mode.Duel) WebBridge.DuelDead(score);
-        else if (score > 0) WebBridge.LBSubmit(mode == Mode.Daily ? "daily" : "endless", score, perfects, level);
+        else if (score > 0 && !bot) WebBridge.LBSubmit(mode == Mode.Daily ? "daily" : "endless", score, perfects, level);
     }
 
     void ShowResults()
