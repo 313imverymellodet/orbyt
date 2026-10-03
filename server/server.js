@@ -62,7 +62,9 @@ function cleanName(raw) {
 // top speed, each worth 1 + up to 2 perfect bonus; this bound is deliberately generous.
 const maxScore = (secs) => Math.ceil(secs * 7 + 10);
 
-const ALLOWED = [/^https:\/\/([a-z0-9-]+\.)*vercel\.app$/, /^http:\/\/localhost(:\d+)?$/, /^http:\/\/127\.0\.0\.1(:\d+)?$/];
+// our Vercel sites, local dev, and the web-game portals that host our builds (they serve games from their own CDNs)
+const PORTALS = /^https:\/\/([a-z0-9-]+\.)*(crazygames\.com|crazygames\.io|poki\.com|poki\.io|poki-gdn\.com|gamedistribution\.com)$/;
+const ALLOWED = [/^https:\/\/([a-z0-9-]+\.)*vercel\.app$/, PORTALS, /^http:\/\/localhost(:\d+)?$/, /^http:\/\/127\.0\.0\.1(:\d+)?$/];
 function cors(req, res) {
   const o = req.headers.origin;
   if (o && ALLOWED.some((r) => r.test(o))) { res.setHeader("Access-Control-Allow-Origin", o); res.setHeader("Vary", "Origin"); }

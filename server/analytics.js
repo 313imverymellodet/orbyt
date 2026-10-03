@@ -43,7 +43,8 @@ export async function analyticsHttp(req, res, url, { send, ipOf }) {
     if (n > 400) { send(res, 429, {}); return true; }
     let b; try { b = await readBody(req); } catch { send(res, 400, {}); return true; }
     const g = String(b.g || "");
-    if (!GAMES.includes(g) || !Array.isArray(b.e)) { send(res, 400, {}); return true; }
+    // portal builds report as "<game>_cg" / "_poki" / "_gd" so each storefront gets its own funnel
+    if (!GAMES.includes(g.replace(/_(cg|poki|gd)$/, "")) || !Array.isArray(b.e)) { send(res, 400, {}); return true; }
     const day = today();
     const sid = String(b.s || "").replace(/[^a-z0-9]/gi, "").slice(0, 24);
     if (sid.length >= 8) await db.query("INSERT INTO ev_sessions (game, day, sid) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING", [g, day, sid]);
