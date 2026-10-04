@@ -13,6 +13,7 @@ import { initRace, raceHttp, raceRemove, handleRace, raceStats } from "./race.js
 import { initKitchen, kitchenHttp, kitchenRemove, handleKitchen, kitchenStats } from "./kitchen.js";
 import { initBrawl, brawlHttp, brawlRemove, handleBrawl, brawlStats } from "./brawl.js";
 import { initObby, obbyHttp, obbyRemove, handleObby, obbyStats } from "./obby.js";
+import { handleKart, kartStats } from "./kart.js";
 import { initSnack, snackHttp, snackRemove } from "./snack.js";
 import { initAnalytics, analyticsHttp } from "./analytics.js";
 
@@ -93,7 +94,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") { res.writeHead(204); return res.end(); }
   const url = new URL(req.url, "http://x");
   try {
-    if (url.pathname === "/" || url.pathname === "/health") return send(res, 200, { ok: true, service: "orbyt-leaderboard", day: today(), duels: duelStats(), race: raceStats(), kitchen: kitchenStats(), brawl: brawlStats(), obby: obbyStats() });
+    if (url.pathname === "/" || url.pathname === "/health") return send(res, 200, { ok: true, service: "orbyt-leaderboard", day: today(), duels: duelStats(), race: raceStats(), kitchen: kitchenStats(), brawl: brawlStats(), obby: obbyStats(), kart: kartStats() });
 
     if (await raceHttp(req, res, url, { send, readJson, cleanName, ipOf, broadcast })) return;
     if (await kitchenHttp(req, res, url, { send, readJson, cleanName, ipOf, broadcast })) return;
@@ -193,9 +194,11 @@ const brawlWss = new WebSocketServer({ noServer: true, maxPayload: 8192 });
 brawlWss.on("connection", (ws, req) => handleBrawl(ws, req, cleanName));
 const obbyWss = new WebSocketServer({ noServer: true, maxPayload: 2048 });
 obbyWss.on("connection", handleObby);
+const kartWss = new WebSocketServer({ noServer: true, maxPayload: 2048 });
+kartWss.on("connection", handleKart);
 server.on("upgrade", (req, socket, head) => {
   const path = new URL(req.url, "http://x").pathname;
-  const target = path === "/live" ? wss : path === "/duel" ? duelWss : path === "/race" ? raceWss : path === "/kitchen" ? kitchenWss : path === "/brawl" ? brawlWss : path === "/obby" ? obbyWss : null;
+  const target = path === "/live" ? wss : path === "/duel" ? duelWss : path === "/race" ? raceWss : path === "/kitchen" ? kitchenWss : path === "/brawl" ? brawlWss : path === "/obby" ? obbyWss : path === "/kart" ? kartWss : null;
   if (!target) return socket.destroy();
   target.handleUpgrade(req, socket, head, (ws) => target.emit("connection", ws, req));
 });

@@ -4,7 +4,7 @@
 // No personal data: a random per-tab session id, the game id, event names and small integer values.
 import crypto from "node:crypto";
 
-const GAMES = ["orbyt", "spacediner", "graveshift", "cityrush", "orderup", "bonkbrawl", "obbyrush", "snackmerge"];
+const GAMES = ["orbyt", "spacediner", "graveshift", "cityrush", "orderup", "bonkbrawl", "obbyrush", "snackmerge", "kartchaos"];
 const NAME = /^[a-z0-9_]{1,40}$/;
 let db = null;
 const lastHit = new Map();
