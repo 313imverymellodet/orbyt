@@ -30,11 +30,26 @@ function roster(room) {
   return karts;
 }
 
-// host: the longest-present active human; they simulate the bots
+// host: the longest-present active human who is actually sending updates; they simulate the bots.
+// A backgrounded tab stops sending (browsers pause it), so hosting moves on instead of freezing every bot.
+const fresh = (p, now) => now - p.last < 2500 || now - p.joined < 4000;
 function pickHost(room) {
+  const now = Date.now();
   const active = room.slots.map((s, i) => ({ s, i })).filter((x) => x.s && x.s.p && !x.s.p.away).sort((a, b) => a.s.p.joined - b.s.p.joined);
-  room.host = active.length ? active[0].i : -1;
+  const live = active.filter((x) => fresh(x.s.p, now));
+  const pick = live.length ? live : active;
+  room.host = pick.length ? pick[0].i : -1;
 }
+setInterval(() => {
+  const now = Date.now();
+  for (const room of rooms.values()) {
+    if (room.state !== "play") continue;
+    const h = room.host >= 0 && room.slots[room.host] && room.slots[room.host].p;
+    if (h && !h.away && fresh(h, now)) continue;
+    const old = room.host; pickHost(room);
+    if (room.host !== old) syncRoster(room);
+  }
+}, 1000);
 
 function snapshot(room, p) {
   return { t: "match", you: p.slot, host: room.host, map: room.map, code: room.priv ? room.code : "", left: Math.max(0, room.endsAt - Date.now()), karts: roster(room), sc: room.scores };
