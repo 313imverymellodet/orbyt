@@ -143,6 +143,7 @@ public class Game : MonoBehaviour
         BuildUI();
         ApplySkin(equipped);
         CreateRival();
+        CreateEcho();
         EnterMenu();
         if (PlayerPrefs.GetInt("howto", 0) == 0) ShowHowTo(true);
         WebBridge.Ready();
@@ -311,7 +312,7 @@ public class Game : MonoBehaviour
         titleA = Label(menuUI, "ORBYT", 190, TOP, new Vector2(-7, -330), Gfx.Hex("#25F4EE"));
         titleB = Label(menuUI, "ORBYT", 190, TOP, new Vector2(7, -330), Gfx.Hex("#FF2E63"));
         titleMain = Label(menuUI, "ORBYT", 190, TOP, new Vector2(0, -330), white);
-        Label(menuUI, "ONE TAP.  TWO ORBITS.  NO MERCY.", 36, TOP, new Vector2(0, -470), dim);
+        Label(menuUI, "ONE TAP.  TWO ORBITS.  DODGE YOUR OWN ECHO.", 36, TOP, new Vector2(0, -470), dim);
         menuBest = Label(menuUI, "", 46, TOP, new Vector2(0, -545), white);
 
         var shardRow = Rect("shards", menuUI, TR, new Vector2(-150, -90), new Vector2(260, 80));
@@ -438,12 +439,15 @@ public class Game : MonoBehaviour
         if (m != Mode.Duel) WebBridge.LBStart(m == Mode.Daily ? "daily" : "endless");
         else Popup(Vector3.up * 1.6f, "GO!", RivalColor, 110);
         lastRank = lastTotal = 0;
+        EchoBegin();
     }
 
     void Die(Vector3 at)
     {
         state = State.Dead;
         deadTimer = 0;
+        SaveEcho();
+        if (echo) echo.gameObject.SetActive(false);
         Sfx.I.Die();
         WebBridge.Vibrate(160);
         var pc = SkinColor();
@@ -482,7 +486,7 @@ public class Game : MonoBehaviour
         dNewBest.gameObject.SetActive(newBest);
         dBest.text = "BEST " + CurrentBest();
         dStats.text = perfects == 0 && level == 0 ? "TIP: SWITCH AT THE LAST SECOND FOR PERFECTS"
-            : perfects + " PERFECT   ·   x" + maxCombo + " COMBO   ·   " + level + " FLIP" + (level == 1 ? "" : "S");
+            : perfects + " PERFECT   ·   x" + maxCombo + " COMBO   ·   " + echoDodges + " ECHO DODGE" + (echoDodges == 1 ? "" : "S");
         dGems.text = gemsRun > 0 ? "+" + gemsRun + " SHARDS" : "";
         if (mode == Mode.Duel) { dNewBest.gameObject.SetActive(false); dBest.text = ""; ShowDuelResult(); }
         else if (lastRank <= 0) dRank.text = "RANKING...";
@@ -565,6 +569,7 @@ public class Game : MonoBehaviour
 
         UpdateVisuals(dt);
         UpdateRival(dt);
+        EchoVisual();
         UpdatePopups();
     }
 
@@ -592,6 +597,7 @@ public class Game : MonoBehaviour
     {
         int from = lane;
         lane = 1 - lane;
+        if (state == State.Playing) echoRec.Add(new Vector2(runTime, lane));
         Sfx.I.Tap(lane);
         Fx.I.Burst(player.position, SkinColor(), 6, 3f, 0.12f, 0.3f);
 
@@ -663,6 +669,7 @@ public class Game : MonoBehaviour
             }
             if (!o.dead && d < -0.9f) Recycle(o);
         }
+        if (!auto) { EchoStep(dt); if (state != State.Playing) return; }
         if (!auto) UpdateObstacleVisuals(0);
     }
 
@@ -1180,6 +1187,161 @@ public class Game : MonoBehaviour
         rivalTrail.endColor = Gfx.A(RivalColor, 0f);
     }
 
+
+    // ======================================================================
+    // ECHO: your previous run rides the rings the other way, replaying your lane switches.
+    // Touch it and you're done; slip past it for +2; outlive it (it dies where you died) for +5.
+    static readonly Color EchoColor = Gfx.Hex("#C9A8FF");
+    const float ECHO_START = 3f;
+    readonly List<Vector2> echoRec = new List<Vector2>();   // (run time, lane) at every switch this run
+    List<Vector2> echoPlay;                                  // the last run's switches
+    float echoDeath, echoAng, echoRad = R_OUT, echoPrevRel;
+    int echoIdx, echoDodges;
+    bool echoOn, echoGone, echoDemo;
+    Transform echo; SpriteRenderer echoCore, echoGlow, echoHalo; TrailRenderer echoTrail;
+
+    void CreateEcho()
+    {
+        echo = new GameObject("Echo").transform;
+        echo.SetParent(transform, false);
+        echoHalo = Spr("halo", sRing, 0.75f, 16, true, echo);
+        echoGlow = Spr("glow", sGlow, 1.5f, 17, true, echo);
+        echoCore = Spr("core", sCircle, 0.3f, 18, false, echo);
+        echoTrail = echo.gameObject.AddComponent<TrailRenderer>();
+        echoTrail.sharedMaterial = matAdd ? matAdd : matAlpha;
+        echoTrail.time = 0.45f; echoTrail.minVertexDistance = 0.05f;
+        echoTrail.widthCurve = new AnimationCurve(new Keyframe(0, 0.24f), new Keyframe(1, 0f));
+        echoTrail.sortingOrder = 15;
+        echoTrail.startColor = Gfx.A(EchoColor, 0.6f); echoTrail.endColor = Gfx.A(EchoColor, 0f);
+        echo.gameObject.SetActive(false);
+    }
+
+    string EchoKey() => mode == Mode.Daily ? "echo_daily" : "echo";
+
+    void EchoBegin()
+    {
+        echoRec.Clear(); echoRec.Add(new Vector2(0, lane));
+        echoOn = echoGone = false; echoIdx = 0; echoDodges = 0; echoDemo = false;
+        echo.gameObject.SetActive(false);
+        echoPlay = null;
+        if (mode == Mode.Duel) return;
+        echoPlay = LoadEcho(PlayerPrefs.GetString(EchoKey(), ""), out echoDeath);
+        if (echoPlay == null || echoDeath < ECHO_START + 2f)
+        {
+            // no previous run yet: a demo echo that switches every second or so, so the hook shows up right away
+            echoDemo = true;
+            echoPlay = new List<Vector2> { new Vector2(0, 1) };
+            float t = 0; int l = 1;
+            var r = new System.Random(7);
+            while (t < 40f) { t += 0.9f + (float)r.NextDouble() * 0.9f; l = 1 - l; echoPlay.Add(new Vector2(t, l)); }
+            echoDeath = 40f;
+        }
+    }
+
+    static List<Vector2> LoadEcho(string s, out float death)
+    {
+        death = 0;
+        if (string.IsNullOrEmpty(s)) return null;
+        var parts = s.Split('|');
+        if (parts.Length != 2 || !float.TryParse(parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out death)) return null;
+        var list = new List<Vector2>();
+        foreach (var e in parts[0].Split(';'))
+        {
+            var kv = e.Split(':');
+            if (kv.Length == 2 && float.TryParse(kv[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var t)) list.Add(new Vector2(t, kv[1] == "0" ? 0 : 1));
+        }
+        return list.Count > 0 ? list : null;
+    }
+
+    void SaveEcho()
+    {
+        if (mode == Mode.Duel || bot) return;
+        var sb = new System.Text.StringBuilder();
+        for (int i = 0; i < echoRec.Count && i < 600; i++)
+        {
+            if (i > 0) sb.Append(';');
+            sb.Append(echoRec[i].x.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)).Append(':').Append((int)echoRec[i].y);
+        }
+        sb.Append('|').Append(runTime.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture));
+        PlayerPrefs.SetString(EchoKey(), sb.ToString());
+    }
+
+    void EchoStep(float dt)
+    {
+        if (echoPlay == null || echoGone) return;
+        if (!echoOn)
+        {
+            if (runTime < ECHO_START) return;
+            echoOn = true;
+            echoAng = theta + Mathf.PI;   // enters on the far side of the rings
+            echoRad = Lanes[(int)echoPlay[0].y];
+            echoPrevRel = 180f;
+            echo.gameObject.SetActive(true);
+            echoTrail.Clear();
+            echo.localPosition = Polar(echoAng, echoRad);
+            Fx.I.Shockwave(echo.position, EchoColor, 2.5f, 0.45f);
+            Popup(Vector3.up * 1.4f, echoDemo ? "DODGE THE ECHO!" : "YOUR LAST RUN IS BACK", EchoColor, 60);
+            Sfx.I.Flip();
+            WebBridge.Event("echo_spawn", Mathf.RoundToInt(echoDeath));
+        }
+        while (echoIdx + 1 < echoPlay.Count && echoPlay[echoIdx + 1].x <= runTime) echoIdx++;
+        int el = (int)echoPlay[echoIdx].y;
+        echoRad = Mathf.Lerp(echoRad, Lanes[el], 1f - Mathf.Exp(-dt * 30f));
+        echoAng -= dir * w * dt;   // same speed, opposite way round
+        echo.localPosition = Polar(echoAng, echoRad);
+
+        float rel = Mathf.DeltaAngle(echoAng * Mathf.Rad2Deg, theta * Mathf.Rad2Deg);
+        bool crossed = Mathf.Sign(rel) != Mathf.Sign(echoPrevRel) && Mathf.Abs(rel) < 90f;
+        bool touching = Mathf.Abs(rel) * Mathf.Deg2Rad * radius < HIT_ARC;
+        echoPrevRel = rel;
+        // ?bot=1 autopilot dodges its echo too
+        if (bot && !crossed && Mathf.Abs(rel) * Mathf.Deg2Rad * radius < 0.9f && Mathf.Abs(Lanes[lane] - echoRad) < 0.5f && attractSwapCooldown <= 0) { Swap(); attractSwapCooldown = 0.12f; }
+        if (crossed || touching)
+        {
+            if (Mathf.Abs(radius - echoRad) < HIT_RAD)
+            {
+                Popup(Vector3.up * 1.6f, "YOUR ECHO GOT YOU", EchoColor, 64);
+                WebBridge.Event("echo_death", echoDodges);
+                Die(echo.position);
+                return;
+            }
+            if (crossed)
+            {
+                echoDodges++;
+                score += 2; scoreText.text = score.ToString(); scorePunch = 1f;
+                Sfx.I.Perfect(Mathf.Min(echoDodges, 6));
+                Fx.I.Burst(echo.position, EchoColor, 12, 4f, 0.12f, 0.45f);
+                Popup(echo.position * 1.2f, "ECHO DODGE  +2", EchoColor, 52);
+                WebBridge.Vibrate(15);
+                if (score >= nextFlip) Flip();
+            }
+        }
+        // it dies where your last run died: outlive it
+        if (runTime >= echoDeath)
+        {
+            echoGone = true;
+            Fx.I.Burst(echo.position, EchoColor, 30, 7f, 0.2f, 0.8f, 1.6f);
+            Fx.I.Shockwave(echo.position, EchoColor, 4f, 0.5f);
+            echo.gameObject.SetActive(false);
+            score += 5; scoreText.text = score.ToString(); scorePunch = 1f;
+            Popup(Vector3.up * 1.4f, echoDemo ? "ECHO GONE  +5" : "YOU OUTLIVED YOUR ECHO  +5", EchoColor, 60);
+            Sfx.I.NewBest();
+            WebBridge.Event("echo_outlived", Mathf.RoundToInt(echoDeath));
+            if (score >= nextFlip) Flip();
+        }
+    }
+
+    void EchoVisual()
+    {
+        if (!echo.gameObject.activeSelf) return;
+        if (state != State.Playing) { if (state == State.Menu) echo.gameObject.SetActive(false); return; }
+        float p = 0.5f + 0.5f * Mathf.Sin(Time.time * 7f);
+        echoCore.color = Gfx.A(Color.Lerp(EchoColor, Color.white, 0.35f), 0.85f);
+        echoGlow.color = Gfx.A(EchoColor, 0.45f + 0.15f * p);
+        echoHalo.color = Gfx.A(EchoColor, 0.35f + 0.25f * p);
+        echoHalo.transform.localScale = Vector3.one * (0.7f + 0.12f * p);
+    }
+
     // ======================================================================
     // How to play
     void BuildHowTo(Transform root)
@@ -1195,7 +1357,7 @@ public class Game : MonoBehaviour
             ("DODGE", "Spikes ride the rings. Touch one and your run is over.", Gfx.Hex("#FF2E63"), 1),
             ("PERFECT", "Switch at the last second for a PERFECT. Chain them for combo points.", Gfx.Hex("#25F4EE"), 1),
             ("FLIP", "Every 25 points the orbit reverses direction and the colors change.", Gfx.Hex("#FFD447"), 2),
-            ("SHARDS", "Grab shards to unlock new skins on the menu.", Gfx.Hex("#7CFF6B"), 1),
+            ("ECHO", "Your last run comes back the other way. Dodge it for +2, outlive it for +5.", EchoColor, 2),
             ("MODES", "DAILY: one course for everyone, ranked. DUEL: race a rival live.", RivalColor, 2),
         };
         for (int i = 0; i < rows.Length; i++)
