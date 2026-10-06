@@ -2,6 +2,9 @@
 // Rooms run back-to-back 150 s matches. Players can join mid-match (taking a bot's seat).
 // Each client simulates its own kart; the room host (a human) also simulates the bots.
 // Hits are reported by the victim's simulator; the server keeps the only scoreboard.
+// COIN HEIST: the score is coins carried. The server owns every coin: arena coins pop up on numbered
+// floor spots (clients map the number onto their own grid), and a hit spills the victim's coins
+// around them (the golden leader spills 75%). Clients claim coins they touch; first claim wins.
 import crypto from "node:crypto";
 
 const MAX = 8, MIN_KARTS = 6, MATCH_MS = 150e3, BREAK_MS = 10e3, MAPS = 2, VEHICLES = 14;
@@ -9,6 +12,7 @@ const BOT_NAMES = ["ZOOMER", "TURBO TOM", "SKIDMARK", "NITRO NAT", "BUMPER", "DR
   "SPARKY", "LUGNUT", "MAX DASH", "ROCKETTE", "WHEELIE", "GRIDLOCK", "TOAST", "BLITZ", "PISTON", "ZIGZAG",
   "CHAOS CAT", "BEEP BEEP", "RALLY", "SPIN CITY", "DONUT", "BOLT", "SCOOT", "FUMES", "COG", "PEDAL"];
 const rooms = new Map();           // code -> room
+const MAX_COINS = 22, SPILL = 0.5, GOLD_SPILL = 0.75, GOLD_MIN = 5;
 let nextId = 1, matchesPlayed = 0;
 
 const code4 = () => { let c; do { c = Array.from({ length: 4 }, () => "ABCDEFGHJKLMNPQRSTUVWXYZ"[crypto.randomInt(24)]).join(""); } while (rooms.has(c)); return c; };
@@ -51,8 +55,25 @@ setInterval(() => {
   }
 }, 1000);
 
+function coinList(room, ids) {
+  const out = [];
+  for (const id of ids || room.coins.keys()) { const c = room.coins.get(id); if (c) out.push(id, c.spot, c.x, c.z); }
+  return out;
+}
+function spawnCoins(room, n) {
+  const made = [];
+  for (let i = 0; i < n; i++) { const id = ++room.coinSeq; room.coins.set(id, { spot: crypto.randomInt(1000), x: 0, z: 0 }); made.push(id); }
+  return made;
+}
+// the unique leader carrying at least GOLD_MIN coins (active karts only)
+function golden(room) {
+  let best = -1, top = -1, tie = false;
+  room.slots.forEach((s, i) => { if (!s || (s.p && s.p.away)) return; const v = room.scores[i]; if (v > top) { top = v; best = i; tie = false; } else if (v === top) tie = true; });
+  return tie || top < GOLD_MIN ? -1 : best;
+}
+
 function snapshot(room, p) {
-  return { t: "match", you: p.slot, host: room.host, map: room.map, code: room.priv ? room.code : "", left: Math.max(0, room.endsAt - Date.now()), karts: roster(room), sc: room.scores };
+  return { t: "match", you: p.slot, host: room.host, map: room.map, code: room.priv ? room.code : "", left: Math.max(0, room.endsAt - Date.now()), karts: roster(room), sc: room.scores, c: coinList(room) };
 }
 
 function fillBots(room) {
@@ -71,6 +92,8 @@ function newMatch(room) {
   for (let i = 0; i < MAX; i++) if (room.slots[i] && room.slots[i].bot) room.slots[i] = newBot(room);   // fresh bot names each match
   fillBots(room);
   room.endsAt = Date.now() + MATCH_MS;
+  room.coins = new Map(); room.coinSeq = room.coinSeq || 0;
+  spawnCoins(room, 12);
   pickHost(room);
   for (const h of humans(room)) if (!h.p.away) send(h.p.ws, snapshot(room, h.p));
   room.timer = setTimeout(() => endMatch(room), MATCH_MS);
@@ -117,7 +140,7 @@ function leave(p) {
 }
 
 function makeRoom(priv) {
-  const room = { code: code4(), priv, slots: new Array(MAX).fill(null), scores: new Array(MAX).fill(0), lastHit: new Array(MAX).fill(0), state: "play", map: crypto.randomInt(MAPS), host: -1, endsAt: 0, timer: null };
+  const room = { code: code4(), priv, slots: new Array(MAX).fill(null), scores: new Array(MAX).fill(0), lastHit: new Array(MAX).fill(0), state: "play", map: crypto.randomInt(MAPS), host: -1, endsAt: 0, timer: null, coins: new Map(), coinSeq: 0 };
   rooms.set(room.code, room);
   return room;
 }
@@ -201,8 +224,27 @@ export function handleKart(ws) {
         p.hits = p.hits.filter((t) => now - t < 1000); if (p.hits.length >= 12) return; p.hits.push(now);
         if (now - room.lastHit[v] < 1000) return;
         room.lastHit[v] = now;
-        room.scores[by]++;
-        cast(room, { t: "h", v, by, p: m.p | 0, sc: room.scores });
+        // spill: half the victim's coins (75% from the golden leader) land in a ring around them; the hitter pockets one
+        const n = Math.ceil(room.scores[v] * (golden(room) === v ? GOLD_SPILL : SPILL));
+        room.scores[v] -= n; room.scores[by]++;
+        const x = Math.max(-25, Math.min(25, Number(m.x) || 0)), z = Math.max(-25, Math.min(25, Number(m.z) || 0));
+        const spilled = [];
+        for (let i = 0; i < n; i++) {
+          const a = Math.random() * Math.PI * 2, r = 1.8 + Math.random() * 1.8, id = ++room.coinSeq;
+          room.coins.set(id, { spot: -1, x: Math.round(Math.max(-24.5, Math.min(24.5, x + Math.cos(a) * r)) * 100), z: Math.round(Math.max(-24.5, Math.min(24.5, z + Math.sin(a) * r)) * 100) });
+          spilled.push(id);
+        }
+        cast(room, { t: "h", v, by, p: m.p | 0, sc: room.scores, c: coinList(room, spilled) });
+        break;
+      }
+      case "cp": {
+        // first claim wins; the claimer must simulate the kart it claims for
+        if (!room || room.state !== "play") return;
+        const id = m.i | 0, k = m.k | 0, now = Date.now();
+        if (!owns(p, k) || !room.coins.has(id)) return;
+        p.picks = (p.picks || []).filter((t) => now - t < 1000); if (p.picks.length >= 25) return; p.picks.push(now);
+        room.coins.delete(id); room.scores[k]++;
+        cast(room, { t: "cg", i: id, k, sc: room.scores });
         break;
       }
       case "b": {
@@ -226,6 +268,15 @@ export function handleKart(ws) {
   ws.on("close", () => leave(p));
   ws.on("error", () => {});
 }
+
+// arena coins keep popping up during play
+setInterval(() => {
+  for (const room of rooms.values()) {
+    if (room.state !== "play" || !room.coins || room.coins.size >= MAX_COINS) continue;
+    const made = spawnCoins(room, 1 + crypto.randomInt(2));
+    cast(room, { t: "cs", c: coinList(room, made) });
+  }
+}, 2000);
 
 export function kartStats() {
   let players = 0, priv = 0;
