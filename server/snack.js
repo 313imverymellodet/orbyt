@@ -68,7 +68,8 @@ export async function snackHttp(req, res, url, { send, readJson, cleanName, ipOf
     if (!Number.isFinite(score) || score <= 0 || score > 2e6 || !Number.isFinite(drops) || drops < 1) { send(res, 400, { error: "bad score" }); return true; }
     // every drop needs real time, and each drop can only feed so many merges
     if (drops * DROP_CD_MS > elapsed + 3000) { send(res, 400, { error: "implausible" }); return true; }
-    if (score > drops * 400 + 2000) { send(res, 400, { error: "implausible" }); return true; }
+    // merges + monster meals (up to ~420 a meal) + pepper blasts: generous ceiling per drop
+    if (score > drops * 650 + 3000) { send(res, 400, { error: "implausible" }); return true; }
     const name = cleanName(b.name);
     if (!name) { send(res, 400, { error: "bad name" }); return true; }
     const player = String(b.player || "").replace(/[^a-f0-9-]/gi, "").slice(0, 40);
