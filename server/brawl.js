@@ -91,8 +91,8 @@ function leave(p) {
 }
 
 function quick(p) {
-  for (const r of rooms.values()) if (!r.priv && r.state === "lobby" && r.players.length < MAX) return join(p, r);
-  const room = { code: code4(), priv: false, state: "lobby", players: [], timer: null, startAt: 0, stage: -1, bots: 0, botLv: 2 };
+  for (const r of rooms.values()) if (!r.priv && r.state === "lobby" && r.players.length < MAX && r.ver === p.ver) return join(p, r);
+  const room = { code: code4(), ver: p.ver, priv: false, state: "lobby", players: [], timer: null, startAt: 0, stage: -1, bots: 0, botLv: 2 };
   rooms.set(room.code, room);
   join(p, room);
 }
@@ -132,7 +132,7 @@ async function tally(room) {
 }
 
 export function handleBrawl(ws, req, cleanName) {
-  const p = { ws, id: "b" + nextId++, pid: null, name: "BRAWLER", ch: 0, room: null, slot: -1 };
+  const p = { ws, id: "b" + nextId++, ver: 1, pid: null, name: "BRAWLER", ch: 0, room: null, slot: -1 };
   send(ws, { t: "hello", id: p.id, online: brawlStats().players });
   ws.on("message", (raw) => {
     if (raw.length > 4000) return;
@@ -151,17 +151,19 @@ export function handleBrawl(ws, req, cleanName) {
         p.ch = Math.max(0, Math.min(39, Math.floor(Number(m.ch)) || 0));
         const pid = String(m.player || "").replace(/[^a-f0-9-]/gi, "").slice(0, 40);
         p.pid = pid.length >= 8 ? pid : null;
+        p.ver = Math.max(1, Math.floor(Number(m.ver)) || 1);   // sim version: different sims would desync, so they never share a room
         break;
       }
       case "quick": quick(p); break;
       case "create": {
-        const r = { code: code4(), priv: true, state: "lobby", players: [], timer: null, startAt: 0, stage: -1, bots: 0, botLv: 2 };
+        const r = { code: code4(), ver: p.ver, priv: true, state: "lobby", players: [], timer: null, startAt: 0, stage: -1, bots: 0, botLv: 2 };
         rooms.set(r.code, r); join(p, r); break;
       }
       case "join": {
         const r = rooms.get(String(m.code || "").toUpperCase());
         if (!r || r.state !== "lobby") send(ws, { t: "error", msg: "Room not found or already fighting." });
         else if (r.players.length >= MAX) send(ws, { t: "error", msg: "That room is full." });
+        else if (r.ver !== p.ver) send(ws, { t: "error", msg: "That room is on a different version. Both players: refresh the page." });
         else join(p, r);
         break;
       }
