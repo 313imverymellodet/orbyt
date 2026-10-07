@@ -634,7 +634,7 @@ public class Game : MonoBehaviour
                 float d = (o.pos - progress) * Lanes[lane];
                 if (d > 0 && d < (bot ? botReach : 0.75f) && attractSwapCooldown <= 0)
                 {
-                    if (bot) { Swap(); botReach = UnityEngine.Random.Range(0.45f, 1.3f); } else lane = 1 - lane;
+                    if (bot) { if (!EchoNear(1 - lane, 1.8f)) { Swap(); botReach = UnityEngine.Random.Range(0.45f, 1.3f); } } else lane = 1 - lane;
                     attractSwapCooldown = 0.12f;
                     break;
                 }
@@ -1295,7 +1295,7 @@ public class Game : MonoBehaviour
         bool touching = Mathf.Abs(rel) * Mathf.Deg2Rad * radius < HIT_ARC;
         echoPrevRel = rel;
         // ?bot=1 autopilot dodges its echo too
-        if (bot && !crossed && Mathf.Abs(rel) * Mathf.Deg2Rad * radius < 0.9f && Mathf.Abs(Lanes[lane] - echoRad) < 0.5f && attractSwapCooldown <= 0) { Swap(); attractSwapCooldown = 0.12f; }
+        if (bot && !crossed && EchoNear(lane, 1.6f) && attractSwapCooldown <= 0) { Swap(); attractSwapCooldown = 0.12f; }
         if (crossed || touching)
         {
             if (Mathf.Abs(radius - echoRad) < HIT_RAD)
@@ -1329,6 +1329,15 @@ public class Game : MonoBehaviour
             WebBridge.Event("echo_outlived", Mathf.RoundToInt(echoDeath));
             if (score >= nextFlip) Flip();
         }
+    }
+
+    // Is the echo about to cross us in this lane? (autopilot only)
+    bool EchoNear(int ln, float reach)
+    {
+        if (!echoOn || echoGone || echoPlay == null) return false;
+        float rel = Mathf.DeltaAngle(echoAng * Mathf.Rad2Deg, theta * Mathf.Rad2Deg);
+        int el = (int)echoPlay[echoIdx].y;
+        return el == ln && Mathf.Abs(rel) * Mathf.Deg2Rad * Lanes[ln] < reach;
     }
 
     void EchoVisual()

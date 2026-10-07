@@ -2,6 +2,15 @@
 
 One tap. Two orbits. No mercy. This is a Unity 6 WebGL arcade game made for mobile browsers and hosted on Vercel.
 
+## The hook: ECHO
+Your previous run comes back. From 3 seconds in, a ghostly orb rides the rings the **opposite way**, replaying your last run's lane switches at the same moments.
+- **Touch it** and the run is over ("YOUR ECHO GOT YOU").
+- **Slip past it** in the other orbit for **+2** (ECHO DODGE).
+- It dies where your last run died: **outlive it for +5**.
+- First-time players get a demo echo, so everyone meets it in the first few seconds. DUEL mode has no echo.
+- Endless and Daily each keep their own echo (PlayerPrefs `echo` / `echo_daily`).
+- Analytics: `echo_spawn`, `echo_death`, `echo_outlived`.
+
 ## How it plays
 - **Tap anywhere** to switch between the inner and outer orbit and dodge the spikes.
 - **PERFECT:** dodge at the last moment to get bonus points. Chain them for combos (CLUTCH, INSANE, GODLIKE).
