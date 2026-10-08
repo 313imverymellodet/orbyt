@@ -133,6 +133,7 @@ public class Game : MonoBehaviour
         fx.Init(cam, sCircle, sRing, matAdd);
 
         best = PlayerPrefs.GetInt("best", 0);
+        echoEnabled = PlayerPrefs.GetInt("echo_on", 0) == 1;   // off unless the player asks for it
         shards = PlayerPrefs.GetInt("shards", 0);
         equipped = viewing = PlayerPrefs.GetInt("skin", 0);
         tutorialDone = PlayerPrefs.GetInt("tut", 0) == 1;
@@ -312,7 +313,7 @@ public class Game : MonoBehaviour
         titleA = Label(menuUI, "ORBYT", 190, TOP, new Vector2(-7, -330), Gfx.Hex("#25F4EE"));
         titleB = Label(menuUI, "ORBYT", 190, TOP, new Vector2(7, -330), Gfx.Hex("#FF2E63"));
         titleMain = Label(menuUI, "ORBYT", 190, TOP, new Vector2(0, -330), white);
-        Label(menuUI, "ONE TAP.  TWO ORBITS.  DODGE YOUR OWN ECHO.", 36, TOP, new Vector2(0, -470), dim);
+        Label(menuUI, "ONE TAP.  TWO ORBITS.  NO MERCY.", 36, TOP, new Vector2(0, -470), dim);
         menuBest = Label(menuUI, "", 46, TOP, new Vector2(0, -545), white);
 
         var shardRow = Rect("shards", menuUI, TR, new Vector2(-150, -90), new Vector2(260, 80));
@@ -329,6 +330,14 @@ public class Game : MonoBehaviour
         }, out muteLabel);
 
         Btn(menuUI, "PLAY", 80, BOT, new Vector2(0, 560), new Vector2(600, 180), white, Gfx.Hex("#0B0620"), () => StartRun(Mode.Endless), out _, 0.5f);
+        // ECHO is opt-in: harder runs, bonus points
+        echoBtn = Btn(menuUI, "", 34, BOT, new Vector2(0, 730), new Vector2(600, 96), new Color(1, 1, 1, 0.1f), white, () =>
+        {
+            echoEnabled = !echoEnabled;
+            PlayerPrefs.SetInt("echo_on", echoEnabled ? 1 : 0); PlayerPrefs.Save();
+            WebBridge.Event(echoEnabled ? "echo_enable" : "echo_disable");
+            RefreshMenu();
+        }, out echoLabel, 0.6f);
         Btn(menuUI, "LEADERBOARD", 30, TR, new Vector2(-170, -190), new Vector2(300, 80), new Color(1, 1, 1, 0.12f), Gfx.Hex("#FFD447"), () => WebBridge.LBShow("daily"), out _, 0.8f);
         Btn(menuUI, "DAILY", 36, BOT, new Vector2(-155, 385), new Vector2(290, 120), new Color(1, 1, 1, 0.14f), white, () => StartRun(Mode.Daily), out dailyLabel, 0.7f);
         Btn(menuUI, "DUEL", 44, BOT, new Vector2(155, 385), new Vector2(290, 120), RivalColor, Gfx.Hex("#0B0620"), () => WebBridge.DuelOpen(), out _, 0.7f);
@@ -485,8 +494,9 @@ public class Game : MonoBehaviour
         dScore.text = score.ToString();
         dNewBest.gameObject.SetActive(newBest);
         dBest.text = "BEST " + CurrentBest();
-        dStats.text = perfects == 0 && level == 0 ? "TIP: SWITCH AT THE LAST SECOND FOR PERFECTS"
-            : perfects + " PERFECT   ·   x" + maxCombo + " COMBO   ·   " + echoDodges + " ECHO DODGE" + (echoDodges == 1 ? "" : "S");
+        dStats.text = echoKilled ? "TOO TOUGH? TURN ECHO MODE OFF ON THE MENU" : perfects == 0 && level == 0 ? "TIP: SWITCH AT THE LAST SECOND FOR PERFECTS"
+            : echoEnabled && mode != Mode.Duel ? perfects + " PERFECT   ·   x" + maxCombo + " COMBO   ·   " + echoDodges + " ECHO DODGE" + (echoDodges == 1 ? "" : "S")
+            : perfects + " PERFECT   ·   x" + maxCombo + " COMBO   ·   " + level + " FLIP" + (level == 1 ? "" : "S");
         dGems.text = gemsRun > 0 ? "+" + gemsRun + " SHARDS" : "";
         if (mode == Mode.Duel) { dNewBest.gameObject.SetActive(false); dBest.text = ""; ShowDuelResult(); }
         else if (lastRank <= 0) dRank.text = "RANKING...";
@@ -1017,6 +1027,10 @@ public class Game : MonoBehaviour
         int db = PlayerPrefs.GetInt(DailyKey(), 0);
         dailyLabel.text = "DAILY #" + DailyNum() + (db > 0 ? "\nBEST " + db : "");
         muteLabel.text = Sfx.I.Muted ? "SOUND OFF" : "SOUND ON";
+        echoLabel.text = echoEnabled ? "ECHO MODE: ON   ·   BONUS POINTS" : "ECHO MODE: OFF   ·   TAP FOR A CHALLENGE";
+        echoLabel.color = echoEnabled ? Gfx.Hex("#0B0620") : new Color(1, 1, 1, 0.7f);
+        echoLabel.fontSize = 30;
+        ((Image)echoBtn.targetGraphic).color = echoEnabled ? EchoColor : new Color(1, 1, 1, 0.1f);
         muteLabel.fontSize = 26;
 
         var s = Skins[viewing];
@@ -1197,7 +1211,8 @@ public class Game : MonoBehaviour
     List<Vector2> echoPlay;                                  // the last run's switches
     float echoDeath, echoAng, echoRad = R_OUT, echoPrevRel;
     int echoIdx, echoDodges;
-    bool echoOn, echoGone, echoDemo;
+    bool echoOn, echoGone, echoDemo, echoEnabled, echoKilled;
+    Button echoBtn; Text echoLabel;
     Transform echo; SpriteRenderer echoCore, echoGlow, echoHalo; TrailRenderer echoTrail;
 
     void CreateEcho()
@@ -1221,10 +1236,10 @@ public class Game : MonoBehaviour
     void EchoBegin()
     {
         echoRec.Clear(); echoRec.Add(new Vector2(0, lane));
-        echoOn = echoGone = false; echoIdx = 0; echoDodges = 0; echoDemo = false;
+        echoOn = echoGone = false; echoIdx = 0; echoDodges = 0; echoDemo = false; echoKilled = false;
         echo.gameObject.SetActive(false);
         echoPlay = null;
-        if (mode == Mode.Duel) return;
+        if (mode == Mode.Duel || !echoEnabled) return;
         echoPlay = LoadEcho(PlayerPrefs.GetString(EchoKey(), ""), out echoDeath);
         if (echoPlay == null || echoDeath < ECHO_START + 2f)
         {
@@ -1302,6 +1317,7 @@ public class Game : MonoBehaviour
             {
                 Popup(Vector3.up * 1.6f, "YOUR ECHO GOT YOU", EchoColor, 64);
                 WebBridge.Event("echo_death", echoDodges);
+                echoKilled = true;
                 Die(echo.position);
                 return;
             }
@@ -1366,7 +1382,7 @@ public class Game : MonoBehaviour
             ("DODGE", "Spikes ride the rings. Touch one and your run is over.", Gfx.Hex("#FF2E63"), 1),
             ("PERFECT", "Switch at the last second for a PERFECT. Chain them for combo points.", Gfx.Hex("#25F4EE"), 1),
             ("FLIP", "Every 25 points the orbit reverses direction and the colors change.", Gfx.Hex("#FFD447"), 2),
-            ("ECHO", "Your last run comes back the other way. Dodge it for +2, outlive it for +5.", EchoColor, 2),
+            ("ECHO", "Optional (menu): your last run comes back the other way. Dodge +2, outlive +5.", EchoColor, 2),
             ("MODES", "DAILY: one course for everyone, ranked. DUEL: race a rival live.", RivalColor, 2),
         };
         for (int i = 0; i < rows.Length; i++)
