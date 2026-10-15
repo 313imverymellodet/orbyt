@@ -4,7 +4,19 @@
   "private": true,
   "type": "module",
   "main": "server.js",
-  "engines": { "node": ">=20" },
-  "scripts": { "start": "node server.js" },
-  "dependencies": { "pg": "^8.13.0", "ws": "^8.18.0" }
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ox": "^0.14.56",
+    "pg": "^8.13.0",
+    "viem": "^2.57.7",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.10"
+  }
 }

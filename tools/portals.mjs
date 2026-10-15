@@ -3,7 +3,7 @@
 //   portals/poki/        + orbyt-poki.zip         Poki SDK v2
 //   portals/gd/          + orbyt-gd.zip           GameDistribution (needs the game id from the GD dashboard)
 // Usage: node tools/portals.mjs [--gd <gameId>]
-// Each copy sets window.PORTAL, loads that portal's SDK, and drops our site-only bits (OG tags, PWA manifest).
+// Each copy sets window.PORTAL, loads that portal's SDK, and drops our site-only bits (OG tags, PWA manifest, Base badges).
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -27,11 +27,12 @@ fs.mkdirSync(out, { recursive: true });
 for (const [name, sdk] of Object.entries(PORTALS)) {
   const dir = path.join(out, name);
   fs.cpSync(dist, dir, { recursive: true });
-  for (const f of ["og.png", "manifest.webmanifest"]) fs.rmSync(path.join(dir, f), { force: true });
+  for (const f of ["og.png", "manifest.webmanifest", "base.js"]) fs.rmSync(path.join(dir, f), { force: true });
   let html = fs.readFileSync(path.join(dir, "index.html"), "utf8");
   html = html
     .replace(/\s*<meta (property="og:|name="twitter:)[^>]*>/g, "")
     .replace(/\s*<link rel="manifest"[^>]*>/, "")
+    .replace(/\s*<script src="base.js"[^>]*><\/script>/, "") // Base badges + wallet sign-in stay on our own sites
     .replace(/\s*<meta name="(apple-mobile-web-app-capable|mobile-web-app-capable|apple-mobile-web-app-status-bar-style)"[^>]*>/g, "")
     .replace("<meta charset=\"utf-8\">", `<meta charset="utf-8">\n  <script>window.PORTAL = "${name}";</script>\n  ${sdk}`);
   if (!html.includes(`window.PORTAL = "${name}"`)) throw new Error("could not inject the SDK into " + name);

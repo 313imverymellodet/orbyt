@@ -16,6 +16,7 @@ import { initObby, obbyHttp, obbyRemove, handleObby, obbyStats } from "./obby.js
 import { handleKart, kartStats } from "./kart.js";
 import { initSnack, snackHttp, snackRemove } from "./snack.js";
 import { initAnalytics, analyticsHttp } from "./analytics.js";
+import { initBase, baseHttp, baseStats } from "./base.js";
 
 const PORT = process.env.PORT || 3000;
 const db = new pg.Pool({
@@ -44,6 +45,7 @@ await initBrawl(db);
 await initObby(db);
 await initSnack(db);
 await initAnalytics(db);
+await initBase(db);
 
 // ---------------------------------------------------------------- helpers
 const today = () => { const d = new Date(); return d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate(); };
@@ -65,7 +67,7 @@ const maxScore = (secs) => Math.ceil(secs * 7 + 10);
 
 // our Vercel sites, local dev, and the web-game portals that host our builds (they serve games from their own CDNs)
 const PORTALS = /^https:\/\/([a-z0-9-]+\.)*(crazygames\.com|crazygames\.io|poki\.com|poki\.io|poki-gdn\.com|gamedistribution\.com)$/;
-const ALLOWED = [/^https:\/\/([a-z0-9-]+\.)*vercel\.app$/, PORTALS, /^http:\/\/localhost(:\d+)?$/, /^http:\/\/127\.0\.0\.1(:\d+)?$/];
+const ALLOWED = [/^https:\/\/([a-z0-9-]+\.)*vercel\.app$/, /^https:\/\/([a-z0-9-]+\.)*mellovibes\.io$/, PORTALS, /^http:\/\/localhost(:\d+)?$/, /^http:\/\/127\.0\.0\.1(:\d+)?$/];
 function cors(req, res) {
   const o = req.headers.origin;
   if (o && ALLOWED.some((r) => r.test(o))) { res.setHeader("Access-Control-Allow-Origin", o); res.setHeader("Vary", "Origin"); }
@@ -94,7 +96,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") { res.writeHead(204); return res.end(); }
   const url = new URL(req.url, "http://x");
   try {
-    if (url.pathname === "/" || url.pathname === "/health") return send(res, 200, { ok: true, service: "orbyt-leaderboard", day: today(), duels: duelStats(), race: raceStats(), kitchen: kitchenStats(), brawl: brawlStats(), obby: obbyStats(), kart: kartStats() });
+    if (url.pathname === "/" || url.pathname === "/health") return send(res, 200, { ok: true, service: "orbyt-leaderboard", day: today(), duels: duelStats(), race: raceStats(), kitchen: kitchenStats(), brawl: brawlStats(), obby: obbyStats(), kart: kartStats(), base: baseStats() });
 
     if (await raceHttp(req, res, url, { send, readJson, cleanName, ipOf, broadcast })) return;
     if (await kitchenHttp(req, res, url, { send, readJson, cleanName, ipOf, broadcast })) return;
@@ -102,6 +104,7 @@ const server = http.createServer(async (req, res) => {
     if (await obbyHttp(req, res, url, { send, cleanName, ipOf, broadcast })) return;
     if (await snackHttp(req, res, url, { send, readJson, cleanName, ipOf, broadcast })) return;
     if (await analyticsHttp(req, res, url, { send, ipOf })) return;
+    if (await baseHttp(req, res, url, { send, ipOf })) return;
 
     if (url.pathname === "/api/run" && req.method === "POST") {
       const token = crypto.randomBytes(16).toString("hex");
