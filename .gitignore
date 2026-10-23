@@ -18,3 +18,10 @@ probe.txt
 ADMIN_KEY.txt
 node_modules/
 .env
+
+# Android builds and signing keys (never commit a keystore)
+/android/
+*.keystore
+*.jks
+*.aab
+*.apk

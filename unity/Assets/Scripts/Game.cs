@@ -111,6 +111,11 @@ public class Game : MonoBehaviour
     readonly List<Vector3> popupWorld = new List<Vector3>();
     float scorePunch;
 
+    // pause (phone calls, home button, back button) + Play build extras
+    RectTransform pauseUI; Text hapticLabel;
+    bool paused; float resumeIn; int lastCount;
+    int streakGain;
+
     // ======================================================================
     void Awake()
     {
@@ -119,6 +124,7 @@ public class Game : MonoBehaviour
         WebGLInput.captureAllKeyboardInput = false;   // keys only when the canvas has focus, so the name box works
 #endif
         Input.multiTouchEnabled = true;
+        Mobile.Init();
         cam = Camera.main;
         cam.orthographic = true;
         cam.clearFlags = CameraClearFlags.SolidColor;
@@ -302,14 +308,17 @@ public class Game : MonoBehaviour
 
         // ---- HUD ----
         hudUI = Fill("HUD", root);
+        hudUI.gameObject.AddComponent<SafeArea>();
         scoreText = Label(hudUI, "0", 130, MID, new Vector2(0, 4), white);
         comboText = Label(hudUI, "", 40, MID, new Vector2(0, -78), white);
         hudBest = Label(hudUI, "", 40, TOP, new Vector2(0, -110), dim);
         flipInText = Label(hudUI, "", 34, TOP, new Vector2(0, -165), dim, FontStyle.Normal);
         tutText = Label(hudUI, "TAP ANYWHERE TO SWITCH ORBIT", 44, BOT, new Vector2(0, 260), white);
+        Btn(hudUI, "II", 46, TL, new Vector2(90, -90), new Vector2(120, 120), new Color(1, 1, 1, 0.1f), white, () => Pause(), out _, 0.7f);
 
         // ---- Menu ----
         menuUI = Fill("Menu", root);
+        menuUI.gameObject.AddComponent<SafeArea>();
         titleA = Label(menuUI, "ORBYT", 190, TOP, new Vector2(-7, -330), Gfx.Hex("#25F4EE"));
         titleB = Label(menuUI, "ORBYT", 190, TOP, new Vector2(7, -330), Gfx.Hex("#FF2E63"));
         titleMain = Label(menuUI, "ORBYT", 190, TOP, new Vector2(0, -330), white);
@@ -338,9 +347,22 @@ public class Game : MonoBehaviour
             WebBridge.Event(echoEnabled ? "echo_enable" : "echo_disable");
             RefreshMenu();
         }, out echoLabel, 0.6f);
-        Btn(menuUI, "LEADERBOARD", 30, TR, new Vector2(-170, -190), new Vector2(300, 80), new Color(1, 1, 1, 0.12f), Gfx.Hex("#FFD447"), () => WebBridge.LBShow("daily"), out _, 0.8f);
-        Btn(menuUI, "DAILY", 36, BOT, new Vector2(-155, 385), new Vector2(290, 120), new Color(1, 1, 1, 0.14f), white, () => StartRun(Mode.Daily), out dailyLabel, 0.7f);
-        Btn(menuUI, "DUEL", 44, BOT, new Vector2(155, 385), new Vector2(290, 120), RivalColor, Gfx.Hex("#0B0620"), () => WebBridge.DuelOpen(), out _, 0.7f);
+        if (Mobile.Native)
+        {
+            // the leaderboard and duels live on the website's servers; the Play build is fully offline
+            Btn(menuUI, "", 26, TR, new Vector2(-170, -190), new Vector2(300, 80), new Color(1, 1, 1, 0.12f), white, () =>
+            {
+                PlayerPrefs.SetInt("haptics_off", PlayerPrefs.GetInt("haptics_off", 0) == 1 ? 0 : 1); PlayerPrefs.Save();
+                Mobile.Vibrate(30); RefreshMenu();
+            }, out hapticLabel, 0.8f);
+            Btn(menuUI, "DAILY", 36, BOT, new Vector2(0, 385), new Vector2(600, 120), new Color(1, 1, 1, 0.14f), white, () => StartRun(Mode.Daily), out dailyLabel, 0.7f);
+        }
+        else
+        {
+            Btn(menuUI, "LEADERBOARD", 30, TR, new Vector2(-170, -190), new Vector2(300, 80), new Color(1, 1, 1, 0.12f), Gfx.Hex("#FFD447"), () => WebBridge.LBShow("daily"), out _, 0.8f);
+            Btn(menuUI, "DAILY", 36, BOT, new Vector2(-155, 385), new Vector2(290, 120), new Color(1, 1, 1, 0.14f), white, () => StartRun(Mode.Daily), out dailyLabel, 0.7f);
+            Btn(menuUI, "DUEL", 44, BOT, new Vector2(155, 385), new Vector2(290, 120), RivalColor, Gfx.Hex("#0B0620"), () => WebBridge.DuelOpen(), out _, 0.7f);
+        }
         Btn(menuUI, "HOW TO PLAY", 26, TL, new Vector2(130, -190), new Vector2(200, 80), new Color(1, 1, 1, 0.12f), white, () => ShowHowTo(true), out _, 0.8f);
 
         Btn(menuUI, "<", 60, BOT, new Vector2(-240, 230), new Vector2(120, 120), new Color(1, 1, 1, 0.1f), white, () => CycleSkin(-1), out _, 0.7f);
@@ -355,26 +377,35 @@ public class Game : MonoBehaviour
         var shade = deadUI.gameObject.AddComponent<Image>();
         shade.color = new Color(0, 0, 0, 0.55f);
         shade.raycastTarget = true;
-        dHead = Label(deadUI, "CRASHED", 64, TOP, new Vector2(0, -300), white);
-        Label(deadUI, "SCORE", 40, TOP, new Vector2(0, -420), dim);
-        dScore = Label(deadUI, "0", 230, TOP, new Vector2(0, -580), white);
-        dNewBest = Label(deadUI, "NEW BEST!", 60, TOP, new Vector2(0, -760), Gfx.Hex("#FFD447"));
-        dBest = Label(deadUI, "", 44, TOP, new Vector2(0, -850), dim);
-        dStats = Label(deadUI, "", 36, TOP, new Vector2(0, -920), dim, FontStyle.Normal);
-        dGems = Label(deadUI, "", 40, TOP, new Vector2(0, -990), Gfx.Hex("#25F4EE"));
-        dRank = Label(deadUI, "", 46, TOP, new Vector2(0, -1070), Gfx.Hex("#FFD447"));
+        var dSafe = Fill("Safe", deadUI); dSafe.gameObject.AddComponent<SafeArea>();
+        dHead = Label(dSafe, "CRASHED", 64, TOP, new Vector2(0, -300), white);
+        Label(dSafe, "SCORE", 40, TOP, new Vector2(0, -420), dim);
+        dScore = Label(dSafe, "0", 230, TOP, new Vector2(0, -580), white);
+        dNewBest = Label(dSafe, "NEW BEST!", 60, TOP, new Vector2(0, -760), Gfx.Hex("#FFD447"));
+        dBest = Label(dSafe, "", 44, TOP, new Vector2(0, -850), dim);
+        dStats = Label(dSafe, "", 36, TOP, new Vector2(0, -920), dim, FontStyle.Normal);
+        dGems = Label(dSafe, "", 40, TOP, new Vector2(0, -990), Gfx.Hex("#25F4EE"));
+        dRank = Label(dSafe, "", 46, TOP, new Vector2(0, -1070), Gfx.Hex("#FFD447"));
 
-        Btn(deadUI, "RETRY", 80, BOT, new Vector2(0, 560), new Vector2(600, 180), white, Gfx.Hex("#0B0620"), () =>
+        Btn(dSafe, "RETRY", 80, BOT, new Vector2(0, 560), new Vector2(600, 180), white, Gfx.Hex("#0B0620"), () =>
         {
             if (mode != Mode.Duel) { StartRun(mode); return; }
             if (!duelOver) return;
             WebBridge.DuelRematch();
             retryLabel.text = duelGhost ? "SEARCHING..." : "WAITING...";
         }, out retryLabel, 0.5f);
-        var share = Btn(deadUI, "SHARE SCORE", 46, BOT, new Vector2(0, 385), new Vector2(600, 120), Gfx.Hex("#25F4EE"), Gfx.Hex("#0B0620"), () => { }, out _, 0.7f);
-        share.gameObject.AddComponent<ShareOnPress>().Text = ShareText;
-        Btn(deadUI, "HOME", 40, BOT, new Vector2(-160, 235), new Vector2(290, 100), new Color(1, 1, 1, 0.12f), white, () => { if (mode == Mode.Duel) WebBridge.DuelLeave(); EnterMenu(); }, out _, 0.8f);
-        Btn(deadUI, "RANKS", 40, BOT, new Vector2(160, 235), new Vector2(290, 100), new Color(1, 1, 1, 0.12f), Gfx.Hex("#FFD447"), () => WebBridge.LBShow(mode == Mode.Daily ? "daily" : "endless"), out _, 0.8f);
+        if (Mobile.Native)
+        {
+            Btn(dSafe, "SHARE SCORE", 46, BOT, new Vector2(0, 385), new Vector2(600, 120), Gfx.Hex("#25F4EE"), Gfx.Hex("#0B0620"), () => Mobile.Share(ShareText(), "Share your ORBYT score"), out _, 0.7f);
+            Btn(dSafe, "HOME", 40, BOT, new Vector2(0, 235), new Vector2(600, 100), new Color(1, 1, 1, 0.12f), white, EnterMenu, out _, 0.8f);
+        }
+        else
+        {
+            var share = Btn(dSafe, "SHARE SCORE", 46, BOT, new Vector2(0, 385), new Vector2(600, 120), Gfx.Hex("#25F4EE"), Gfx.Hex("#0B0620"), () => { }, out _, 0.7f);
+            share.gameObject.AddComponent<ShareOnPress>().Text = ShareText;
+            Btn(dSafe, "HOME", 40, BOT, new Vector2(-160, 235), new Vector2(290, 100), new Color(1, 1, 1, 0.12f), white, () => { if (mode == Mode.Duel) WebBridge.DuelLeave(); EnterMenu(); }, out _, 0.8f);
+            Btn(dSafe, "RANKS", 40, BOT, new Vector2(160, 235), new Vector2(290, 100), new Color(1, 1, 1, 0.12f), Gfx.Hex("#FFD447"), () => WebBridge.LBShow(mode == Mode.Daily ? "daily" : "endless"), out _, 0.8f);
+        }
 
         // ---- overlay ----
         for (int i = 0; i < 8; i++)
@@ -386,6 +417,7 @@ public class Game : MonoBehaviour
             popups.Add(p); popupLife.Add(0); popupWorld.Add(Vector3.zero);
         }
         BuildHowTo(root);
+        BuildPause(root);
         flash = Fill("flash", root).gameObject.AddComponent<Image>();
         flash.color = new Color(1, 1, 1, 0); flash.raycastTarget = false;
     }
@@ -476,12 +508,13 @@ public class Game : MonoBehaviour
             if (mode == Mode.Daily) PlayerPrefs.SetInt(DailyKey(), score);
             else { best = score; PlayerPrefs.SetInt("best", best); }
         }
+        streakGain = mode == Mode.Daily && !bot ? DailyStreak() : 0;
         PlayerPrefs.SetInt("shards", shards);
         PlayerPrefs.SetInt("runs", PlayerPrefs.GetInt("runs", 0) + 1);
         PlayerPrefs.Save();
         WebBridge.Event(mode == Mode.Daily ? "death_daily" : "death", score);
         if (mode == Mode.Duel) WebBridge.DuelDead(score);
-        else if (score > 0 && !bot) WebBridge.LBSubmit(mode == Mode.Daily ? "daily" : "endless", score, perfects, level);
+        else if (score > 0 && !bot && !Mobile.Native) WebBridge.LBSubmit(mode == Mode.Daily ? "daily" : "endless", score, perfects, level);
     }
 
     void ShowResults()
@@ -499,6 +532,14 @@ public class Game : MonoBehaviour
             : perfects + " PERFECT   ·   x" + maxCombo + " COMBO   ·   " + level + " FLIP" + (level == 1 ? "" : "S");
         dGems.text = gemsRun > 0 ? "+" + gemsRun + " SHARDS" : "";
         if (mode == Mode.Duel) { dNewBest.gameObject.SetActive(false); dBest.text = ""; ShowDuelResult(); }
+        else if (streakGain > 0)
+        {
+            int st = PlayerPrefs.GetInt("streak", 1);
+            dRank.text = "DAY " + st + " STREAK  ·  +" + streakGain + " SHARDS";
+            dRank.color = Gfx.Hex("#FFD447");
+            StartCoroutine(PopRank());
+        }
+        else if (Mobile.Native) dRank.text = "";
         else if (lastRank <= 0) dRank.text = "RANKING...";
         if (newBest) { Sfx.I.NewBest(); Flash(Gfx.Hex("#FFD447"), 0.3f); }
     }
@@ -543,15 +584,26 @@ public class Game : MonoBehaviour
 
         // Input
         bool tapped = false;
+        var evs = EventSystem.current;
         if (Input.touchCount > 0)
         {
             for (int i = 0; i < Input.touchCount; i++)
-                if (Input.GetTouch(i).phase == TouchPhase.Began) tapped = true;
+            {
+                var tc = Input.GetTouch(i);
+                if (tc.phase == TouchPhase.Began && !(evs && evs.IsPointerOverGameObject(tc.fingerId))) tapped = true;
+            }
         }
-        else if (Input.GetMouseButtonDown(0)) tapped = true;
+        else if (Input.GetMouseButtonDown(0) && !(evs && evs.IsPointerOverGameObject())) tapped = true;
+
+        if (Input.GetKeyDown(KeyCode.Escape)) { Back(); tapped = false; }
+        if (paused) { tapped = false; TickPause(); }
         if (Input.GetKeyDown(KeyCode.Space) || Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.DownArrow)) tapped = true;
 
-        if (state == State.Playing)
+        if (state == State.Playing && paused)
+        {
+            UpdateObstacleVisuals(0);
+        }
+        else if (state == State.Playing)
         {
             if (tapped) Swap();
             runTime += dt;
@@ -609,6 +661,7 @@ public class Game : MonoBehaviour
         lane = 1 - lane;
         if (state == State.Playing) echoRec.Add(new Vector2(runTime, lane));
         Sfx.I.Tap(lane);
+        if (state == State.Playing && !bot) Mobile.Vibrate(8, 60);
         Fx.I.Burst(player.position, SkinColor(), 6, 3f, 0.12f, 0.3f);
 
         // Arm PERFECT on the nearest spike we just dodged.
@@ -1025,7 +1078,9 @@ public class Game : MonoBehaviour
         menuBest.text = best > 0 ? "BEST  " + best : "";
         shardText.text = shards.ToString();
         int db = PlayerPrefs.GetInt(DailyKey(), 0);
-        dailyLabel.text = "DAILY #" + DailyNum() + (db > 0 ? "\nBEST " + db : "");
+        int streak = StreakAlive() ? PlayerPrefs.GetInt("streak", 0) : 0;
+        dailyLabel.text = "DAILY #" + DailyNum() + (db > 0 ? "\nBEST " + db : streak > 0 ? "\nKEEP YOUR " + streak + "-DAY STREAK" : "");
+        if (hapticLabel) hapticLabel.text = PlayerPrefs.GetInt("haptics_off", 0) == 1 ? "VIBRATION OFF" : "VIBRATION ON";
         muteLabel.text = Sfx.I.Muted ? "SOUND OFF" : "SOUND ON";
         echoLabel.text = echoEnabled ? "ECHO MODE: ON   ·   BONUS POINTS" : "ECHO MODE: OFF   ·   TAP FOR A CHALLENGE";
         echoLabel.color = echoEnabled ? Gfx.Hex("#0B0620") : new Color(1, 1, 1, 0.7f);
@@ -1368,12 +1423,100 @@ public class Game : MonoBehaviour
     }
 
     // ======================================================================
+    // Pause: the HUD button, Android back, and leaving the app (calls, notifications, home)
+    void BuildPause(Transform root)
+    {
+        pauseUI = Fill("Pause", root);
+        var shade = pauseUI.gameObject.AddComponent<Image>();
+        shade.color = new Color(0.02f, 0.01f, 0.08f, 0.82f);
+        var safe = Fill("Safe", pauseUI); safe.gameObject.AddComponent<SafeArea>();
+        Vector2 TOP = new Vector2(0.5f, 1), BOT = new Vector2(0.5f, 0);
+        Label(safe, "PAUSED", 120, TOP, new Vector2(0, -420), Color.white);
+        Btn(safe, "RESUME", 80, BOT, new Vector2(0, 560), new Vector2(600, 180), Color.white, Gfx.Hex("#0B0620"), () => Resume(), out _, 0.5f);
+        Btn(safe, "HOME", 40, BOT, new Vector2(0, 385), new Vector2(600, 110), new Color(1, 1, 1, 0.12f), Color.white, () =>
+        {
+            paused = false; pauseUI.gameObject.SetActive(false);
+            Sfx.I.Music.UnPause();
+            if (mode == Mode.Duel) WebBridge.DuelLeave();
+            EnterMenu();
+        }, out _, 0.8f);
+        pauseUI.gameObject.SetActive(false);
+    }
+
+    void Pause()
+    {
+        if (state != State.Playing || paused || mode == Mode.Duel) return;   // a live duel can't be paused
+        paused = true; resumeIn = 0;
+        Time.timeScale = 0f;
+        Sfx.I.Music.Pause();
+        pauseUI.gameObject.SetActive(true);
+        PlayerPrefs.Save();
+    }
+
+    void Resume()
+    {
+        if (!paused || resumeIn > 0) return;
+        resumeIn = 3f; lastCount = 0;   // 3-2-1 so nobody crashes the instant they come back
+        pauseUI.gameObject.SetActive(false);
+    }
+
+    void TickPause()
+    {
+        if (resumeIn <= 0) return;
+        resumeIn -= Time.unscaledDeltaTime;
+        int n = Mathf.CeilToInt(resumeIn);
+        if (n > 0 && n != lastCount) { lastCount = n; Popup(Vector3.up * 1.6f, n.ToString(), Color.white, 150); Sfx.I.Click(); }
+        if (resumeIn <= 0)
+        {
+            paused = false; resumeIn = 0;
+            Time.timeScale = 1f;
+            Sfx.I.Music.UnPause();
+        }
+    }
+
+    void OnApplicationPause(bool p) { if (p) Pause(); }
+    void OnApplicationFocus(bool f) { if (!f && Mobile.Native) Pause(); }
+
+    void Back()
+    {
+        if (howUI && howUI.parent.gameObject.activeSelf) { ShowHowTo(false); return; }
+        if (paused) { if (resumeIn <= 0) Resume(); return; }
+        switch (state)
+        {
+            case State.Playing: Pause(); break;
+            case State.Dead: if (deadUI.gameObject.activeSelf) { if (mode == Mode.Duel) WebBridge.DuelLeave(); EnterMenu(); } break;
+            case State.Menu: Mobile.MoveToBack(); break;
+        }
+    }
+
+    // Daily streak: play the daily on consecutive days for growing shard bonuses (5 per day, max 50).
+    bool StreakAlive()
+    {
+        int last = PlayerPrefs.GetInt("streak_day", 0);
+        return last == DailyNum() || last == DailyNum() - 1;
+    }
+
+    int DailyStreak()
+    {
+        int today = DailyNum(), last = PlayerPrefs.GetInt("streak_day", 0);
+        if (last == today) return 0;   // already counted today
+        int streak = last == today - 1 ? PlayerPrefs.GetInt("streak", 0) + 1 : 1;
+        PlayerPrefs.SetInt("streak", streak);
+        PlayerPrefs.SetInt("streak_day", today);
+        int gain = Mathf.Min(streak * 5, 50);
+        shards += gain;
+        return gain;
+    }
+
+    // ======================================================================
     // How to play
     void BuildHowTo(Transform root)
     {
-        howUI = Fill("HowTo", root);
-        var shade = howUI.gameObject.AddComponent<Image>();
+        var howShade = Fill("HowTo", root);
+        var shade = howShade.gameObject.AddComponent<Image>();
         shade.color = new Color(0.02f, 0.01f, 0.08f, 0.94f);
+        var hs = Fill("Safe", howShade); hs.gameObject.AddComponent<SafeArea>();
+        howUI = hs;
         Vector2 TOP = new Vector2(0.5f, 1), BOT = new Vector2(0.5f, 0);
         Label(howUI, "HOW TO PLAY", 84, TOP, new Vector2(0, -230), Color.white);
         var rows = new (string title, string body, Color c, int icon)[]
@@ -1383,7 +1526,9 @@ public class Game : MonoBehaviour
             ("PERFECT", "Switch at the last second for a PERFECT. Chain them for combo points.", Gfx.Hex("#25F4EE"), 1),
             ("FLIP", "Every 25 points the orbit reverses direction and the colors change.", Gfx.Hex("#FFD447"), 2),
             ("ECHO", "Optional (menu): your last run comes back the other way. Dodge +2, outlive +5.", EchoColor, 2),
-            ("MODES", "DAILY: one course for everyone, ranked. DUEL: race a rival live.", RivalColor, 2),
+            Mobile.Native
+                ? ("DAILY", "A new course every day. Play it on back-to-back days for a growing shard bonus.", RivalColor, 2)
+                : ("MODES", "DAILY: one course for everyone, ranked. DUEL: race a rival live.", RivalColor, 2),
         };
         for (int i = 0; i < rows.Length; i++)
         {
@@ -1402,13 +1547,13 @@ public class Game : MonoBehaviour
             b.rectTransform.sizeDelta = new Vector2(720, 90);
         }
         Btn(howUI, "GOT IT", 64, BOT, new Vector2(0, 220), new Vector2(560, 160), Color.white, Gfx.Hex("#0B0620"), () => ShowHowTo(false), out _, 0.5f);
-        howUI.gameObject.SetActive(false);
+        howShade.gameObject.SetActive(false);
     }
 
     void ShowHowTo(bool on)
     {
         if (!howUI) return;
-        howUI.gameObject.SetActive(on);
+        howUI.parent.gameObject.SetActive(on);
         if (!on) { PlayerPrefs.SetInt("howto", 1); PlayerPrefs.Save(); }
     }
 }

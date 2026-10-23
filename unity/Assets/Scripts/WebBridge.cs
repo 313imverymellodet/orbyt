@@ -37,6 +37,8 @@ public static class WebBridge
     {
 #if UNITY_WEBGL && !UNITY_EDITOR
         OrbytVibrate(ms);
+#else
+        Mobile.Vibrate(ms);
 #endif
     }
 
