@@ -61,6 +61,12 @@ public static class AndroidBuild
         PlayerSettings.SetIl2CppCodeGeneration(NamedBuildTarget.Android, Il2CppCodeGeneration.OptimizeSpeed);
 
         SetIcon();
+        SetAdMobAppId();
+        if (!apk && Ads.UsingTestIds && !HasArg("-testAds"))
+        {
+            Fail("Ads.cs still has Google's test AdMob IDs. Paste this game's AdMob app ID and rewarded unit ID into unity/Assets/Scripts/Ads.cs (or pass -testAds for an internal test build).");
+            return;
+        }
         if (!Sign() && !apk)
         {
             Fail("Signing key not set. Set MV_KEYSTORE, MV_KEYSTORE_PASS, MV_KEY_ALIAS and MV_KEY_PASS (see ANDROID.md), or build a test APK with -apk.");
@@ -111,6 +117,23 @@ public static class AndroidBuild
             }
         }
         catch (Exception e) { Debug.LogWarning("Adaptive icons not set: " + e.Message); }
+    }
+
+    // The Google Mobile Ads plugin reads the app ID from its settings asset; keep it in sync with Ads.AppId.
+    static void SetAdMobAppId()
+    {
+        const string path = "Assets/GoogleMobileAds/Resources/GoogleMobileAdsSettings.asset";
+        var settings = AssetDatabase.LoadAssetAtPath<ScriptableObject>(path);
+        if (!settings)
+        {
+            var type = Type.GetType("GoogleMobileAds.Editor.GoogleMobileAdsSettings, GoogleMobileAds.Editor");
+            settings = type?.GetMethod("LoadInstance", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)?.Invoke(null, null) as ScriptableObject;
+        }
+        if (!settings) { Debug.LogWarning("Google Mobile Ads settings not found; the ads plugin will stop the build."); return; }
+        var so = new SerializedObject(settings);
+        so.FindProperty("adMobAndroidAppId").stringValue = Ads.AppId;
+        so.ApplyModifiedPropertiesWithoutUndo();
+        AssetDatabase.SaveAssets();
     }
 
     static Texture2D Tex(string path)

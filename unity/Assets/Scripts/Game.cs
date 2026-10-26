@@ -113,6 +113,8 @@ public class Game : MonoBehaviour
 
     // pause (phone calls, home button, back button) + Play build extras
     RectTransform pauseUI; Text hapticLabel;
+    Button continueBtn, removeAdsBtn, privacyBtn; Text continueLabel, removeAdsLabel;
+    bool continued;   // one rewarded continue per run (Play build)
     bool paused; float resumeIn; int lastCount;
     int streakGain;
 
@@ -125,6 +127,8 @@ public class Game : MonoBehaviour
 #endif
         Input.multiTouchEnabled = true;
         Mobile.Init();
+        Ads.Init();
+        Ads.Changed += RefreshAds;
         cam = Camera.main;
         cam.orthographic = true;
         cam.clearFlags = CameraClearFlags.SolidColor;
@@ -356,6 +360,8 @@ public class Game : MonoBehaviour
                 Mobile.Vibrate(30); RefreshMenu();
             }, out hapticLabel, 0.8f);
             Btn(menuUI, "DAILY", 36, BOT, new Vector2(0, 385), new Vector2(600, 120), new Color(1, 1, 1, 0.14f), white, () => StartRun(Mode.Daily), out dailyLabel, 0.7f);
+            removeAdsBtn = Btn(menuUI, "", 26, BOT, new Vector2(-135, 85), new Vector2(330, 64), new Color(1, 1, 1, 0.1f), Gfx.Hex("#FFD447"), Ads.BuyRemoveAds, out removeAdsLabel, 0.8f);
+            privacyBtn = Btn(menuUI, "PRIVACY", 26, BOT, new Vector2(175, 85), new Vector2(230, 64), new Color(1, 1, 1, 0.1f), dim, Ads.ShowPrivacyOptions, out _, 0.8f);
         }
         else
         {
@@ -398,6 +404,7 @@ public class Game : MonoBehaviour
         {
             Btn(dSafe, "SHARE SCORE", 46, BOT, new Vector2(0, 385), new Vector2(600, 120), Gfx.Hex("#25F4EE"), Gfx.Hex("#0B0620"), () => Mobile.Share(ShareText(), "Share your ORBYT score"), out _, 0.7f);
             Btn(dSafe, "HOME", 40, BOT, new Vector2(0, 235), new Vector2(600, 100), new Color(1, 1, 1, 0.12f), white, EnterMenu, out _, 0.8f);
+            continueBtn = Btn(dSafe, "", 40, BOT, new Vector2(0, 735), new Vector2(600, 110), Gfx.Hex("#FFD447"), Gfx.Hex("#0B0620"), ContinueRun, out continueLabel, 0.7f);
         }
         else
         {
@@ -451,6 +458,7 @@ public class Game : MonoBehaviour
         ClearObstacles(false);
         Fx.I.ClearAll();
         state = State.Playing;
+        continued = false;
         score = 0; level = 0; combo = 0; maxCombo = 0; perfects = 0; gemsRun = 0; runTime = 0; comboTimer = 0;
         nextFlip = FLIP_EVERY; newBest = false;
         dir = 1f; progress = 0; theta = Mathf.PI * 0.5f; lane = 1; radius = R_OUT; w = SpeedTarget();
@@ -542,6 +550,45 @@ public class Game : MonoBehaviour
         else if (Mobile.Native) dRank.text = "";
         else if (lastRank <= 0) dRank.text = "RANKING...";
         if (newBest) { Sfx.I.NewBest(); Flash(Gfx.Hex("#FFD447"), 0.3f); }
+        RefreshAds();
+    }
+
+    // Rewarded continue: clears the orbit and resumes the same run after a 3-2-1, once per run.
+    void ContinueRun()
+    {
+        if (state != State.Dead || continued) return;
+        Ads.ShowRewarded(ok =>
+        {
+            if (!ok || state != State.Dead || continued) { RefreshAds(); return; }
+            continued = true;
+            ClearObstacles(false);
+            nextPos = progress + 1.5f;
+            combo = 0; comboText.text = "";
+            state = State.Playing;
+            player.gameObject.SetActive(true);
+            deadUI.gameObject.SetActive(false);
+            hudUI.gameObject.SetActive(true);
+            Sfx.I.Music.volume = 0.55f; Sfx.I.Music.pitch = 1f; Sfx.I.Music.Pause();
+            paused = true; resumeIn = 3f; lastCount = 0;
+            Time.timeScale = 0f;
+            WebBridge.Event("continue_ad", score);
+        });
+    }
+
+    void RefreshAds()
+    {
+        if (continueBtn)
+        {
+            bool can = mode == Mode.Endless && !continued && score > 0 && (Ads.Available || Ads.AdFree);
+            continueBtn.gameObject.SetActive(can);
+            continueLabel.text = Ads.AdFree ? "CONTINUE" : "CONTINUE  ·  WATCH AD";
+        }
+        if (removeAdsBtn)
+        {
+            removeAdsBtn.gameObject.SetActive(!Ads.AdFree && Ads.CanBuyRemoveAds);
+            removeAdsLabel.text = "NO ADS  ·  " + Ads.RemoveAdsPrice;
+        }
+        if (privacyBtn) privacyBtn.gameObject.SetActive(Ads.PrivacyOptionsRequired);
     }
 
     [System.Serializable] class RankMsg { public int rank, total, best; public bool newBest; public string error, mode; }
@@ -1081,6 +1128,7 @@ public class Game : MonoBehaviour
         int streak = StreakAlive() ? PlayerPrefs.GetInt("streak", 0) : 0;
         dailyLabel.text = "DAILY #" + DailyNum() + (db > 0 ? "\nBEST " + db : streak > 0 ? "\nKEEP YOUR " + streak + "-DAY STREAK" : "");
         if (hapticLabel) hapticLabel.text = PlayerPrefs.GetInt("haptics_off", 0) == 1 ? "VIBRATION OFF" : "VIBRATION ON";
+        RefreshAds();
         muteLabel.text = Sfx.I.Muted ? "SOUND OFF" : "SOUND ON";
         echoLabel.text = echoEnabled ? "ECHO MODE: ON   ·   BONUS POINTS" : "ECHO MODE: OFF   ·   TAP FOR A CHALLENGE";
         echoLabel.color = echoEnabled ? Gfx.Hex("#0B0620") : new Color(1, 1, 1, 0.7f);
