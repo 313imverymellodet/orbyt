@@ -1,6 +1,7 @@
 // Native iOS helpers for Mobile.cs and Ads.cs: haptics, the share sheet and the App Tracking Transparency prompt.
 // Same file in every Mello Vibes game.
 #import <UIKit/UIKit.h>
+#import <AVFoundation/AVFoundation.h>
 #import <AppTrackingTransparency/AppTrackingTransparency.h>
 
 extern "C" {
@@ -34,6 +35,32 @@ void MV_Share(const char* text)
         [root presentViewController:vc animated:YES completion:nil];
     });
 }
+
+// Unity's default "Ambient" audio session goes quiet when the Silent switch is on. "Playback" plays anyway;
+// MixWithOthers keeps the player's own music (Spotify, Apple Music) running underneath.
+void MV_AudioPlayback()
+{
+    AVAudioSession* s = [AVAudioSession sharedInstance];
+    [s setCategory:AVAudioSessionCategoryPlayback withOptions:AVAudioSessionCategoryOptionMixWithOthers error:nil];
+    [s setActive:YES error:nil];
+}
+
+}
+
+// Applies MV_AudioPlayback every time the app becomes active (launch, back from the home screen, after a call),
+// after Unity has set up its own audio session. Works without any C# call.
+@interface MVAudioSessionHook : NSObject
+@end
+
+@implementation MVAudioSessionHook
++ (void)load
+{
+    [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:[NSOperationQueue mainQueue]
+                                                  usingBlock:^(NSNotification* n) { MV_AudioPlayback(); }];
+}
+@end
+
+extern "C" {
 
 // 0 not determined, 1 restricted, 2 denied, 3 authorized (iOS < 14 has no prompt: reported as authorized)
 int MV_TrackingStatus()

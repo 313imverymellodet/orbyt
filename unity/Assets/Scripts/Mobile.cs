@@ -13,6 +13,7 @@ public static class Mobile
 #if UNITY_IOS && !UNITY_EDITOR
     [System.Runtime.InteropServices.DllImport("__Internal")] static extern void MV_Haptic(int style);
     [System.Runtime.InteropServices.DllImport("__Internal")] static extern void MV_Share(string text);
+    [System.Runtime.InteropServices.DllImport("__Internal")] static extern void MV_AudioPlayback();
 #endif
 
     // Run at the display's real refresh rate. Android and iOS default to 30 fps when targetFrameRate is -1.
@@ -23,6 +24,21 @@ public static class Mobile
         Application.targetFrameRate = Mathf.Max(60, hz);
         Screen.sleepTimeout = SleepTimeout.NeverSleep;
         Input.backButtonLeavesApp = false;
+#if UNITY_IOS && !UNITY_EDITOR
+        PlayThroughSilentSwitch();
+        var keeper = new GameObject("AudioSession");
+        Object.DontDestroyOnLoad(keeper);
+        keeper.AddComponent<AudioSessionKeeper>();
+#endif
+    }
+
+    // Sound plays with the iPhone's Silent switch on. Ads, calls and Siri can reset the audio session,
+    // so AudioSessionKeeper applies it again whenever the app gets focus back.
+    public static void PlayThroughSilentSwitch()
+    {
+#if UNITY_IOS && !UNITY_EDITOR
+        MV_AudioPlayback();
+#endif
     }
 
 #if UNITY_ANDROID && !UNITY_EDITOR
@@ -99,6 +115,11 @@ public static class Mobile
         try { Activity.Call<bool>("moveTaskToBack", true); } catch (System.Exception) { Application.Quit(); }
 #endif
     }
+}
+
+public class AudioSessionKeeper : MonoBehaviour
+{
+    void OnApplicationFocus(bool focus) { if (focus) Mobile.PlayThroughSilentSwitch(); }
 }
 
 // Keeps a full-screen UI rect inside Screen.safeArea (notches, punch-hole cameras, gesture bar).
