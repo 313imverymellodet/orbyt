@@ -3,10 +3,11 @@
 #import <UIKit/UIKit.h>
 #import <AppTrackingTransparency/AppTrackingTransparency.h>
 
-extern UIViewController* UnityGetGLViewController();
-extern void UnitySendMessage(const char* obj, const char* method, const char* msg);
-
 extern "C" {
+
+// Unity's own C functions: declared inside extern "C" so they link to the unmangled symbols
+UIViewController* UnityGetGLViewController();
+void UnitySendMessage(const char* obj, const char* method, const char* msg);
 
 // style: 0 light, 1 medium, 2 heavy
 void MV_Haptic(int style)
