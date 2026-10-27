@@ -1,26 +1,41 @@
+#if (UNITY_ANDROID || UNITY_IOS) && !UNITY_EDITOR
+#define MV_NATIVE_ADS
+#endif
 using System;
 using System.Linq;
 using UnityEngine;
-#if UNITY_ANDROID && !UNITY_EDITOR
+#if MV_NATIVE_ADS
 using System.Collections.Generic;
 using GoogleMobileAds.Api;
 using GoogleMobileAds.Ump.Api;
 using UnityEngine.Purchasing;
 #endif
 
-// Google Play monetization: AdMob rewarded ads (behind Google's consent form for EEA/UK players) and a
-// one-time "Remove Ads" purchase that works as an ad-free pass, so every reward is granted without a video.
-// Only the Android player uses this; the browser build keeps its portal ads in WebBridge.
+// Google Play / App Store monetization: AdMob rewarded ads (behind Google's consent form for EEA/UK players and,
+// on iOS, Apple's tracking prompt) and a one-time "Remove Ads" purchase that works as an ad-free pass, so every
+// reward is granted without a video. Only the phone builds use this; the browser build keeps its portal ads in WebBridge.
 // Same file in every Mello Vibes game; only the per-game IDs below differ.
 public static class Ads
 {
-    // ---- per-game settings (from AdMob → Apps → this app). Google's test IDs until the real ones are pasted in;
-    // AndroidBuild.Release refuses to ship them. ----
-    public const string AppId = "ca-app-pub-3940256099942544~3347511713";
-    public const string RewardedUnitId = "ca-app-pub-3940256099942544/5224354917";
-    public const string RemoveAdsProduct = "remove_ads";   // Play Console → Monetize → In-app products (non-consumable)
+    // ---- per-game settings (from AdMob → Apps). Google's test IDs until the real ones are pasted in;
+    // AndroidBuild.Release and IosBuild refuse to ship them unless -testAds. ----
+    public const string AndroidAppId = "ca-app-pub-3940256099942544~3347511713";
+    public const string AndroidRewardedId = "ca-app-pub-3940256099942544/5224354917";
+    public const string IosAppId = "ca-app-pub-3940256099942544~1458002511";
+    public const string IosRewardedId = "ca-app-pub-3940256099942544/1712485313";
+    public const string RemoveAdsProduct = "remove_ads";   // Play Console and App Store Connect: non-consumable
 
-    public static bool UsingTestIds => AppId.Contains("3940256099942544") || RewardedUnitId.Contains("3940256099942544");
+    // Text in Apple's "Allow tracking?" prompt (Info.plist NSUserTrackingUsageDescription).
+    public const string TrackingReason = "This lets us show you ads that are more relevant to you. You can say no and still play with every feature.";
+
+    const string TestPublisher = "3940256099942544";
+    public static bool AndroidUsesTestIds => AndroidAppId.Contains(TestPublisher) || AndroidRewardedId.Contains(TestPublisher);
+    public static bool IosUsesTestIds => IosAppId.Contains(TestPublisher) || IosRewardedId.Contains(TestPublisher);
+#if UNITY_IOS
+    static string RewardedUnitId => IosRewardedId;
+#else
+    static string RewardedUnitId => AndroidRewardedId;
+#endif
 
     public static bool Available { get; private set; }   // a rewarded video is loaded and can be shown now
     public static bool AdFree => PlayerPrefs.GetInt("ad_free", 0) == 1;
@@ -28,29 +43,41 @@ public static class Ads
     public static string RemoveAdsPrice { get; private set; } = "";   // localized, e.g. "$2.99"
     public static bool PrivacyOptionsRequired { get; private set; }   // show a "Privacy" button (EEA/UK)
     public static bool Showing { get; private set; }   // a full-screen ad is up: don't treat the focus loss as a pause
+    // Apple requires a visible "Restore Purchases" button for non-consumables; Google Play restores on its own.
+    public static bool ShowRestoreButton => Application.platform == RuntimePlatform.IPhonePlayer && !AdFree;
 
     // Availability, price or ad-free state changed: refresh any buttons that depend on them.
     public static event Action Changed;
 
-#if UNITY_ANDROID && !UNITY_EDITOR
+#if MV_NATIVE_ADS
     static bool started, adsStarted;
     static RewardedAd rewarded;
     static bool loading;
     static int retry;
     static StoreController store;
 #endif
+#if UNITY_IOS && !UNITY_EDITOR
+    [System.Runtime.InteropServices.DllImport("__Internal")] static extern int MV_TrackingStatus();
+    [System.Runtime.InteropServices.DllImport("__Internal")] static extern void MV_RequestTracking(string receiver);
+
+    // Receives the tracking prompt's answer from MelloNative.mm through UnitySendMessage.
+    class TrackingReceiver : MonoBehaviour
+    {
+        public void OnTracking(string status) { StartAds(); Destroy(gameObject); }
+    }
+#endif
 
     // Call once at startup, after Mobile.Init().
     public static void Init()
     {
-#if UNITY_ANDROID && !UNITY_EDITOR
+#if MV_NATIVE_ADS
         if (started) return;
         started = true;
         MobileAds.RaiseAdEventsOnUnityMainThread = true;
         InitStore();
 
         // Consent first: ads may only be requested once Google's UMP says so (it shows the form only where required).
-        if (ConsentInformation.CanRequestAds()) StartAds();   // consent from an earlier session
+        if (ConsentInformation.CanRequestAds()) AfterConsent();   // consent from an earlier session
         ConsentInformation.Update(new ConsentRequestParameters(), updateError =>
         {
             if (updateError != null) Debug.LogWarning("Consent update failed: " + updateError.Message);
@@ -58,7 +85,7 @@ public static class Ads
             {
                 if (formError != null) Debug.LogWarning("Consent form failed: " + formError.Message);
                 PrivacyOptionsRequired = ConsentInformation.PrivacyOptionsRequirementStatus == PrivacyOptionsRequirementStatus.Required;
-                if (ConsentInformation.CanRequestAds()) StartAds();
+                if (ConsentInformation.CanRequestAds()) AfterConsent();
                 Changed?.Invoke();
             });
         });
@@ -70,7 +97,7 @@ public static class Ads
     public static void ShowRewarded(Action<bool> done)
     {
         if (AdFree) { done?.Invoke(true); return; }
-#if UNITY_ANDROID && !UNITY_EDITOR
+#if MV_NATIVE_ADS
         if (rewarded == null || !rewarded.CanShowAd()) { done?.Invoke(false); Load(); return; }
         var ad = rewarded;
         rewarded = null;
@@ -99,17 +126,29 @@ public static class Ads
 
     public static void BuyRemoveAds()
     {
-#if UNITY_ANDROID && !UNITY_EDITOR
+#if MV_NATIVE_ADS
         var p = store?.GetProductById(RemoveAdsProduct);
         if (p == null || AdFree) return;
         store.PurchaseProduct(p);
 #endif
     }
 
+    // App Store: asks Apple for earlier purchases (may prompt for the Apple ID password).
+    public static void RestorePurchases()
+    {
+#if MV_NATIVE_ADS
+        store?.RestoreTransactions((ok, error) =>
+        {
+            if (!ok) Debug.LogWarning("Restore failed: " + error);
+            store.FetchPurchases();
+        });
+#endif
+    }
+
     // Google's form for changing consent; required to be reachable when PrivacyOptionsRequired.
     public static void ShowPrivacyOptions()
     {
-#if UNITY_ANDROID && !UNITY_EDITOR
+#if MV_NATIVE_ADS
         ConsentForm.ShowPrivacyOptionsForm(e =>
         {
             if (e != null) Debug.LogWarning("Privacy options failed: " + e.Message);
@@ -118,7 +157,24 @@ public static class Ads
 #endif
     }
 
-#if UNITY_ANDROID && !UNITY_EDITOR
+#if MV_NATIVE_ADS
+    // iOS: Apple's tracking prompt comes after Google's consent form, then ads start either way
+    // (a "no" just means non-personalized ads).
+    static void AfterConsent()
+    {
+#if UNITY_IOS && !UNITY_EDITOR
+        if (MV_TrackingStatus() == 0)
+        {
+            var go = new GameObject("MelloAdsTracking");
+            UnityEngine.Object.DontDestroyOnLoad(go);
+            go.AddComponent<TrackingReceiver>();
+            MV_RequestTracking(go.name);
+            return;
+        }
+#endif
+        StartAds();
+    }
+
     static void StartAds()
     {
         if (adsStarted) return;

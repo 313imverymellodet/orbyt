@@ -1,16 +1,21 @@
 using UnityEngine;
 
-// Native phone integrations for the Google Play build. In the browser build every call
+// Native phone integrations for the Google Play and App Store builds. In the browser build every call
 // here falls through to the existing WebBridge path, so the web game is unchanged.
 public static class Mobile
 {
-#if UNITY_ANDROID && !UNITY_EDITOR
+#if (UNITY_ANDROID || UNITY_IOS) && !UNITY_EDITOR
     public static readonly bool Native = true;
 #else
     public static readonly bool Native = false;
 #endif
 
-    // Run at the display's real refresh rate. Android defaults to 30 fps when targetFrameRate is -1.
+#if UNITY_IOS && !UNITY_EDITOR
+    [System.Runtime.InteropServices.DllImport("__Internal")] static extern void MV_Haptic(int style);
+    [System.Runtime.InteropServices.DllImport("__Internal")] static extern void MV_Share(string text);
+#endif
+
+    // Run at the display's real refresh rate. Android and iOS default to 30 fps when targetFrameRate is -1.
     public static void Init()
     {
         if (!Native) return;
@@ -57,6 +62,9 @@ public static class Mobile
         {
             Handheld.Vibrate();   // also makes Unity add the VIBRATE permission to the manifest
         }
+#elif UNITY_IOS && !UNITY_EDITOR
+        if (PlayerPrefs.GetInt("haptics_off", 0) == 1) return;
+        MV_Haptic(ms <= 15 ? 0 : ms <= 60 ? 1 : 2);
 #endif
     }
 
@@ -76,12 +84,15 @@ public static class Mobile
             }
         }
         catch (System.Exception e) { Debug.LogWarning("Share failed: " + e.Message); }
+#elif UNITY_IOS && !UNITY_EDITOR
+        MV_Share(text);
 #else
         GUIUtility.systemCopyBuffer = text;
 #endif
     }
 
     // Back goes to the home screen without killing the process (what Android users expect from a game).
+    // iOS has no back button, so this is never reached there.
     public static void MoveToBack()
     {
 #if UNITY_ANDROID && !UNITY_EDITOR

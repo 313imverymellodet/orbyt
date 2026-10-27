@@ -62,7 +62,7 @@ public static class AndroidBuild
 
         SetIcon();
         SetAdMobAppId();
-        if (!apk && Ads.UsingTestIds && !HasArg("-testAds"))
+        if (!apk && Ads.AndroidUsesTestIds && !HasArg("-testAds"))
         {
             Fail("Ads.cs still has Google's test AdMob IDs. Paste this game's AdMob app ID and rewarded unit ID into unity/Assets/Scripts/Ads.cs (or pass -testAds for an internal test build).");
             return;
@@ -119,7 +119,7 @@ public static class AndroidBuild
         catch (Exception e) { Debug.LogWarning("Adaptive icons not set: " + e.Message); }
     }
 
-    // The Google Mobile Ads plugin reads the app ID from its settings asset; keep it in sync with Ads.AppId.
+    // The Google Mobile Ads plugin reads the app ID from its settings asset; keep it in sync with Ads.AndroidAppId.
     static void SetAdMobAppId()
     {
         const string path = "Assets/GoogleMobileAds/Resources/GoogleMobileAdsSettings.asset";
@@ -131,7 +131,7 @@ public static class AndroidBuild
         }
         if (!settings) { Debug.LogWarning("Google Mobile Ads settings not found; the ads plugin will stop the build."); return; }
         var so = new SerializedObject(settings);
-        so.FindProperty("adMobAndroidAppId").stringValue = Ads.AppId;
+        so.FindProperty("adMobAndroidAppId").stringValue = Ads.AndroidAppId;
         so.ApplyModifiedPropertiesWithoutUndo();
         AssetDatabase.SaveAssets();
     }

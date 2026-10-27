@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -113,7 +114,7 @@ public class Game : MonoBehaviour
 
     // pause (phone calls, home button, back button) + Play build extras
     RectTransform pauseUI; Text hapticLabel;
-    Button continueBtn, removeAdsBtn, privacyBtn; Text continueLabel, removeAdsLabel;
+    Button continueBtn, removeAdsBtn, restoreBtn, privacyBtn; Text continueLabel, removeAdsLabel;
     bool continued;   // one rewarded continue per run (Play build)
     bool paused; float resumeIn; int lastCount;
     int streakGain;
@@ -360,8 +361,9 @@ public class Game : MonoBehaviour
                 Mobile.Vibrate(30); RefreshMenu();
             }, out hapticLabel, 0.8f);
             Btn(menuUI, "DAILY", 36, BOT, new Vector2(0, 385), new Vector2(600, 120), new Color(1, 1, 1, 0.14f), white, () => StartRun(Mode.Daily), out dailyLabel, 0.7f);
-            removeAdsBtn = Btn(menuUI, "", 26, BOT, new Vector2(-135, 85), new Vector2(330, 64), new Color(1, 1, 1, 0.1f), Gfx.Hex("#FFD447"), Ads.BuyRemoveAds, out removeAdsLabel, 0.8f);
-            privacyBtn = Btn(menuUI, "PRIVACY", 26, BOT, new Vector2(175, 85), new Vector2(230, 64), new Color(1, 1, 1, 0.1f), dim, Ads.ShowPrivacyOptions, out _, 0.8f);
+            removeAdsBtn = Btn(menuUI, "", 24, BOT, new Vector2(0, 85), new Vector2(280, 64), new Color(1, 1, 1, 0.1f), Gfx.Hex("#FFD447"), Ads.BuyRemoveAds, out removeAdsLabel, 0.8f);
+            restoreBtn = Btn(menuUI, "RESTORE", 24, BOT, new Vector2(0, 85), new Vector2(220, 64), new Color(1, 1, 1, 0.1f), dim, Ads.RestorePurchases, out _, 0.8f);
+            privacyBtn = Btn(menuUI, "PRIVACY", 24, BOT, new Vector2(0, 85), new Vector2(220, 64), new Color(1, 1, 1, 0.1f), dim, Ads.ShowPrivacyOptions, out _, 0.8f);
         }
         else
         {
@@ -587,8 +589,18 @@ public class Game : MonoBehaviour
         {
             removeAdsBtn.gameObject.SetActive(!Ads.AdFree && Ads.CanBuyRemoveAds);
             removeAdsLabel.text = "NO ADS  ·  " + Ads.RemoveAdsPrice;
+            restoreBtn.gameObject.SetActive(Ads.ShowRestoreButton);
+            privacyBtn.gameObject.SetActive(Ads.PrivacyOptionsRequired);
+            // spread whichever of NO ADS / RESTORE / PRIVACY are showing across the bottom row
+            var row = new[] { removeAdsBtn, restoreBtn, privacyBtn }.Where(b => b.gameObject.activeSelf).ToArray();
+            float total = row.Sum(b => ((RectTransform)b.transform).sizeDelta.x) + 20 * (row.Length - 1), x = -total / 2;
+            foreach (var b in row)
+            {
+                var rt = (RectTransform)b.transform;
+                rt.anchoredPosition = new Vector2(x + rt.sizeDelta.x / 2, 85);
+                x += rt.sizeDelta.x + 20;
+            }
         }
-        if (privacyBtn) privacyBtn.gameObject.SetActive(Ads.PrivacyOptionsRequired);
     }
 
     [System.Serializable] class RankMsg { public int rank, total, best; public bool newBest; public string error, mode; }
