@@ -1,6 +1,10 @@
 #if (UNITY_ANDROID || UNITY_IOS) && !UNITY_EDITOR
 #define MV_NATIVE_ADS
 #endif
+// A game whose Assets/csc.rsp defines MV_REVENUECAT (and that has the RevenueCat package) sells through RevenueCat.
+#if MV_NATIVE_ADS && MV_REVENUECAT
+#define MV_RC
+#endif
 using System;
 using System.Linq;
 using UnityEngine;
@@ -24,6 +28,11 @@ public static class Ads
     public const string IosAppId = "ca-app-pub-3940256099942544~1458002511";
     public const string IosRewardedId = "ca-app-pub-3940256099942544/1712485313";
     public const string RemoveAdsProduct = "remove_ads";   // Play Console and App Store Connect: non-consumable
+    // RevenueCat public SDK keys (app.revenuecat.com → project → API keys: "appl_..." / "goog_..."). Only games built
+    // with MV_REVENUECAT read them; an empty key keeps that platform on Unity IAP.
+    public const string RevenueCatAppleKey = "";
+    public const string RevenueCatGoogleKey = "";
+    public const string RemoveAdsEntitlement = "no_ads";   // the RevenueCat entitlement remove_ads unlocks
 
     // Text in Apple's "Allow tracking?" prompt (Info.plist NSUserTrackingUsageDescription).
     public const string TrackingReason = "This lets us show you ads that are more relevant to you. You can say no and still play with every feature.";
@@ -74,6 +83,9 @@ public static class Ads
         if (started) return;
         started = true;
         MobileAds.RaiseAdEventsOnUnityMainThread = true;
+#if MV_RC
+        if (!string.IsNullOrEmpty(RevenueCatKey)) InitRevenueCat(); else
+#endif
         InitStore();
 
         // Consent first: ads may only be requested once Google's UMP says so (it shows the form only where required).
@@ -127,8 +139,12 @@ public static class Ads
     public static void BuyRemoveAds()
     {
 #if MV_NATIVE_ADS
+        if (AdFree) return;
+#if MV_RC
+        if (rc != null) { BuyWithRevenueCat(); return; }
+#endif
         var p = store?.GetProductById(RemoveAdsProduct);
-        if (p == null || AdFree) return;
+        if (p == null) return;
         store.PurchaseProduct(p);
 #endif
     }
@@ -137,6 +153,9 @@ public static class Ads
     public static void RestorePurchases()
     {
 #if MV_NATIVE_ADS
+#if MV_RC
+        if (rc != null) { RestoreWithRevenueCat(); return; }
+#endif
         store?.RestoreTransactions((ok, error) =>
         {
             if (!ok) Debug.LogWarning("Restore failed: " + error);
@@ -199,6 +218,9 @@ public static class Ads
             }
             retry = 0;
             rewarded = ad;
+#if MV_RC
+            ad.OnAdPaid += v => TrackAdRevenue(v, ad);
+#endif
             Available = true;
             Changed?.Invoke();
         });
@@ -240,6 +262,92 @@ public static class Ads
         PlayerPrefs.Save();
         rewarded?.Destroy(); rewarded = null; Available = false;
         Changed?.Invoke();
+    }
+#endif
+
+#if MV_RC
+    // ---------------- RevenueCat (MV_REVENUECAT games) ----------------
+    // RevenueCat completes the App Store / Play purchase, keeps the receipt server-side and restores it on any device;
+    // the remove_ads product unlocks the no_ads entitlement. AdMob's paid events go to RevenueCat's ad tracker so ad
+    // and purchase revenue show up together.
+    static Purchases rc;
+    static bool rcReady;
+    static string RevenueCatKey => Application.platform == RuntimePlatform.IPhonePlayer ? RevenueCatAppleKey : RevenueCatGoogleKey;
+
+    class RevenueCatListener : Purchases.UpdatedCustomerInfoListener
+    {
+        public override void CustomerInfoReceived(Purchases.CustomerInfo info) => ApplyCustomerInfo(info);
+    }
+
+    // Purchases.Start sets up the native bridge; configure on the next frame, after it has run.
+    class RevenueCatStarter : MonoBehaviour
+    {
+        System.Collections.IEnumerator Start()
+        {
+            yield return null;
+            rc.Configure(Purchases.PurchasesConfiguration.Builder.Init(RevenueCatKey).Build());
+            rcReady = true;
+            rc.GetProducts(new[] { RemoveAdsProduct }, (products, error) =>
+            {
+                if (error != null) { Debug.LogWarning("RevenueCat products unavailable: " + error.Message); return; }
+                var p = products?.FirstOrDefault(x => x.Identifier == RemoveAdsProduct);
+                CanBuyRemoveAds = p != null;
+                RemoveAdsPrice = p?.PriceString ?? "";
+                Changed?.Invoke();
+            }, "inapp");
+            rc.GetCustomerInfo((info, error) => { if (error == null) ApplyCustomerInfo(info); });   // restores after a reinstall
+            Destroy(this);
+        }
+    }
+
+    static void InitRevenueCat()
+    {
+        var go = new GameObject("RevenueCat");
+        UnityEngine.Object.DontDestroyOnLoad(go);
+        rc = go.AddComponent<Purchases>();
+        rc.useRuntimeSetup = true;
+        rc.listener = go.AddComponent<RevenueCatListener>();
+        go.AddComponent<RevenueCatStarter>();
+    }
+
+    static void BuyWithRevenueCat()
+    {
+        if (!rcReady) return;
+        rc.PurchaseProduct(RemoveAdsProduct, result =>
+        {
+            if (result.Error != null) { if (!result.UserCancelled) Debug.LogWarning("Purchase failed: " + result.Error.Message); return; }
+            ApplyCustomerInfo(result.CustomerInfo);
+        }, "inapp");
+    }
+
+    static void RestoreWithRevenueCat()
+    {
+        if (!rcReady) return;
+        rc.RestorePurchases((info, error) =>
+        {
+            if (error != null) { Debug.LogWarning("Restore failed: " + error.Message); return; }
+            ApplyCustomerInfo(info);
+        });
+    }
+
+    // The entitlement is the source of truth; owning the product also counts, in case the entitlement isn't set up yet.
+    static void ApplyCustomerInfo(Purchases.CustomerInfo info)
+    {
+        if (info == null) return;
+        bool owns = info.Entitlements?.Active != null && info.Entitlements.Active.ContainsKey(RemoveAdsEntitlement)
+                    || info.AllPurchasedProductIdentifiers != null && info.AllPurchasedProductIdentifiers.Contains(RemoveAdsProduct);
+        if (owns) Grant();
+    }
+
+    static void TrackAdRevenue(AdValue v, RewardedAd ad)
+    {
+        if (!rcReady) return;
+        var precision = v.Precision == AdValue.PrecisionType.Precise ? RevenueCat.AdTracker.Precision.Exact
+            : v.Precision == AdValue.PrecisionType.PublisherProvided ? RevenueCat.AdTracker.Precision.PublisherDefined
+            : v.Precision == AdValue.PrecisionType.Estimated ? RevenueCat.AdTracker.Precision.Estimated
+            : RevenueCat.AdTracker.Precision.Unknown;
+        rc.AdTracker.TrackAdRevenue(new RevenueCat.AdRevenueData(RevenueCat.AdTracker.MediatorName.AdMob, RevenueCat.AdTracker.Format.Rewarded,
+            RewardedUnitId, ad.GetResponseInfo()?.GetResponseId() ?? "", v.Value, v.CurrencyCode, precision));
     }
 #endif
 }
