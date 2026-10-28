@@ -61,7 +61,18 @@ public static class IosBuild
 
         // the full square icon (no alpha, 1024) doubles as the App Store icon; Unity scales the rest
         var icon = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Android/icon.png");
-        if (icon) PlayerSettings.SetIcons(NamedBuildTarget.iOS, new[] { icon }, IconKind.Any);
+        if (icon)
+        {
+            PlayerSettings.SetIcons(NamedBuildTarget.iOS, new[] { icon }, IconKind.Any);
+            // SetIcons alone can leave the App Store (1024), Spotlight, Settings and Notification slots empty, and
+            // App Store Connect rejects a build without the 1024 icon, so fill every iOS icon slot explicitly.
+            foreach (var kind in PlayerSettings.GetSupportedIconKinds(NamedBuildTarget.iOS))
+            {
+                var slots = PlayerSettings.GetPlatformIcons(NamedBuildTarget.iOS, kind);
+                foreach (var slot in slots) slot.SetTextures(icon);
+                PlayerSettings.SetPlatformIcons(NamedBuildTarget.iOS, kind, slots);
+            }
+        }
 
         SetAdMobIos();
         EditorUserBuildSettings.SwitchActiveBuildTarget(BuildTargetGroup.iOS, BuildTarget.iOS);
