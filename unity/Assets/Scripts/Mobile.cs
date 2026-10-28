@@ -14,6 +14,9 @@ public static class Mobile
     [System.Runtime.InteropServices.DllImport("__Internal")] static extern void MV_Haptic(int style);
     [System.Runtime.InteropServices.DllImport("__Internal")] static extern void MV_Share(string text);
     [System.Runtime.InteropServices.DllImport("__Internal")] static extern void MV_AudioPlayback();
+    [System.Runtime.InteropServices.DllImport("__Internal")] static extern void MV_NotifyRequest();
+    [System.Runtime.InteropServices.DllImport("__Internal")] static extern void MV_NotifySchedule(string id, string title, string body, int seconds);
+    [System.Runtime.InteropServices.DllImport("__Internal")] static extern void MV_NotifyCancelAll();
 #endif
 
     // Run at the display's real refresh rate. Android and iOS default to 30 fps when targetFrameRate is -1.
@@ -81,6 +84,29 @@ public static class Mobile
 #elif UNITY_IOS && !UNITY_EDITOR
         if (PlayerPrefs.GetInt("haptics_off", 0) == 1) return;
         MV_Haptic(ms <= 15 ? 0 : ms <= 60 ? 1 : 2);
+#endif
+    }
+
+    // Local reminder notifications (iOS). Ask once at a moment the reminder makes sense; schedule when the player leaves
+    // and cancel when they're back. Android and the browser build do nothing.
+    public static void RequestNotifications()
+    {
+#if UNITY_IOS && !UNITY_EDITOR
+        MV_NotifyRequest();
+#endif
+    }
+
+    public static void Notify(string id, string title, string body, int seconds)
+    {
+#if UNITY_IOS && !UNITY_EDITOR
+        MV_NotifySchedule(id, title, body, seconds);
+#endif
+    }
+
+    public static void CancelNotifications()
+    {
+#if UNITY_IOS && !UNITY_EDITOR
+        MV_NotifyCancelAll();
 #endif
     }
 

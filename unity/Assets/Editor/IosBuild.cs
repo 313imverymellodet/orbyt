@@ -117,6 +117,7 @@ public static class IosBuild
         proj.ReadFromFile(projPath);
         var fw = proj.GetUnityFrameworkTargetGuid();
         proj.AddFrameworkToProject(fw, "AppTrackingTransparency.framework", true);   // weak: MelloNative.mm's tracking prompt
+        proj.AddFrameworkToProject(fw, "UserNotifications.framework", false);   // MelloNative.mm's reminder notifications
         proj.WriteToFile(projPath);
     }
 #endif

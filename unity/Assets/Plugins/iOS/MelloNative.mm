@@ -3,6 +3,7 @@
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <AppTrackingTransparency/AppTrackingTransparency.h>
+#import <UserNotifications/UserNotifications.h>
 
 extern "C" {
 
@@ -61,6 +62,33 @@ void MV_AudioPlayback()
 @end
 
 extern "C" {
+
+// Local notifications (reminders the game schedules itself; no server). iOS shows the permission prompt only once.
+void MV_NotifyRequest()
+{
+    [[UNUserNotificationCenter currentNotificationCenter] requestAuthorizationWithOptions:(UNAuthorizationOptionAlert | UNAuthorizationOptionSound)
+                                                                        completionHandler:^(BOOL granted, NSError* error) {}];
+}
+
+// Replaces any pending reminder with the same id. Without permission iOS drops it silently.
+void MV_NotifySchedule(const char* ident, const char* title, const char* body, int seconds)
+{
+    if (seconds < 1) return;
+    UNMutableNotificationContent* c = [[UNMutableNotificationContent alloc] init];
+    c.title = [NSString stringWithUTF8String:title ? title : ""];
+    c.body = [NSString stringWithUTF8String:body ? body : ""];
+    c.sound = [UNNotificationSound defaultSound];
+    UNTimeIntervalNotificationTrigger* t = [UNTimeIntervalNotificationTrigger triggerWithTimeInterval:seconds repeats:NO];
+    UNNotificationRequest* r = [UNNotificationRequest requestWithIdentifier:[NSString stringWithUTF8String:ident ? ident : "mv"] content:c trigger:t];
+    [[UNUserNotificationCenter currentNotificationCenter] addNotificationRequest:r withCompletionHandler:nil];
+}
+
+void MV_NotifyCancelAll()
+{
+    UNUserNotificationCenter* n = [UNUserNotificationCenter currentNotificationCenter];
+    [n removeAllPendingNotificationRequests];
+    [n removeAllDeliveredNotifications];
+}
 
 // 0 not determined, 1 restricted, 2 denied, 3 authorized (iOS < 14 has no prompt: reported as authorized)
 int MV_TrackingStatus()
