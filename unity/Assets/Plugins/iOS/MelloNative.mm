@@ -1,4 +1,4 @@
-// Native iOS helpers for Mobile.cs and Ads.cs: haptics, the share sheet and the App Tracking Transparency prompt.
+// Native iOS helpers for Mobile.cs and Ads.cs: haptics, the share sheet, alerts and the App Tracking Transparency prompt.
 // Same file in every Mello Vibes game.
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
@@ -34,6 +34,21 @@ void MV_Share(const char* text)
         vc.popoverPresentationController.sourceRect = CGRectMake(root.view.bounds.size.width / 2, root.view.bounds.size.height, 1, 1);
         vc.popoverPresentationController.permittedArrowDirections = 0;
         [root presentViewController:vc animated:YES completion:nil];
+    });
+}
+
+// A system alert with an OK button (store results: purchase failed, restored, nothing to restore).
+void MV_Alert(const char* title, const char* message)
+{
+    NSString* t = [NSString stringWithUTF8String:title ? title : ""];
+    NSString* m = [NSString stringWithUTF8String:message ? message : ""];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIViewController* root = UnityGetGLViewController();
+        if (!root) return;
+        while (root.presentedViewController) root = root.presentedViewController;
+        UIAlertController* a = [UIAlertController alertControllerWithTitle:t message:m preferredStyle:UIAlertControllerStyleAlert];
+        [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [root presentViewController:a animated:YES completion:nil];
     });
 }
 

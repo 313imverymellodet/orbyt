@@ -60,6 +60,7 @@ public static class Ads
 
 #if MV_NATIVE_ADS
     static bool started, adsStarted;
+    static bool buying, restoring;   // the player tapped NO ADS / RESTORE: tell them how it went
     static RewardedAd rewarded;
     static bool loading;
     static int retry;
@@ -144,21 +145,25 @@ public static class Ads
         if (rc != null) { BuyWithRevenueCat(); return; }
 #endif
         var p = store?.GetProductById(RemoveAdsProduct);
-        if (p == null) return;
+        if (p == null) { StoreNotReady(); return; }
+        buying = true;
         store.PurchaseProduct(p);
 #endif
     }
 
-    // App Store: asks Apple for earlier purchases (may prompt for the Apple ID password).
+    // App Store: asks Apple for earlier purchases (may prompt for the Apple ID password). Every outcome shows an alert,
+    // so the button never looks dead.
     public static void RestorePurchases()
     {
 #if MV_NATIVE_ADS
 #if MV_RC
         if (rc != null) { RestoreWithRevenueCat(); return; }
 #endif
-        store?.RestoreTransactions((ok, error) =>
+        if (store == null) { StoreNotReady(); return; }
+        store.RestoreTransactions((ok, error) =>
         {
-            if (!ok) Debug.LogWarning("Restore failed: " + error);
+            if (ok) restoring = true;
+            else Mobile.Alert("Restore failed", string.IsNullOrEmpty(error) ? "The App Store didn't answer. Try again in a moment." : error);
             store.FetchPurchases();
         });
 #endif
@@ -244,9 +249,16 @@ public static class Ads
             {
                 if (orders.ConfirmedOrders.Any(Owns)) Grant();
                 foreach (var o in orders.PendingOrders) store.ConfirmPurchase(o);
+                if (restoring) { restoring = false; RestoreResult(); }
             };
             store.OnPurchasePending += order => { if (Owns(order)) Grant(); store.ConfirmPurchase(order); };
-            store.OnPurchaseFailed += f => Debug.LogWarning("Purchase failed: " + f.FailureReason + " " + f.Details);
+            store.OnPurchaseFailed += f =>
+            {
+                Debug.LogWarning("Purchase failed: " + f.FailureReason + " " + f.Details);
+                buying = false;
+                if (f.FailureReason != PurchaseFailureReason.UserCancelled)
+                    Mobile.Alert("Purchase failed", string.IsNullOrEmpty(f.Details) ? f.FailureReason.ToString() : f.Details);
+            };
             await store.Connect();
             store.FetchProducts(new List<ProductDefinition> { new ProductDefinition(RemoveAdsProduct, ProductType.NonConsumable) });
         }
@@ -257,12 +269,19 @@ public static class Ads
 
     static void Grant()
     {
+        if (buying) { buying = false; Mobile.Alert("Ads removed", "Thank you! Every bonus is now yours without a video."); }
         if (AdFree) return;
         PlayerPrefs.SetInt("ad_free", 1);
         PlayerPrefs.Save();
         rewarded?.Destroy(); rewarded = null; Available = false;
         Changed?.Invoke();
     }
+
+    static void StoreNotReady() =>
+        Mobile.Alert("Store not ready", "The App Store isn't connected yet. Check your internet connection and try again in a moment.");
+
+    static void RestoreResult() => Mobile.Alert(AdFree ? "Purchases restored" : "Nothing to restore",
+        AdFree ? "Ads are removed again. Thank you!" : "This Apple ID hasn't bought Remove Ads yet.");
 #endif
 
 #if MV_RC
@@ -312,22 +331,32 @@ public static class Ads
 
     static void BuyWithRevenueCat()
     {
-        if (!rcReady) return;
+        if (!rcReady) { StoreNotReady(); return; }
         rc.PurchaseProduct(RemoveAdsProduct, result =>
         {
-            if (result.Error != null) { if (!result.UserCancelled) Debug.LogWarning("Purchase failed: " + result.Error.Message); return; }
-            ApplyCustomerInfo(result.CustomerInfo);
+            if (result.Error != null) { if (!result.UserCancelled) StoreError("Purchase failed", result.Error); return; }
+            // the store took the payment: the pass is the player's even if the entitlement isn't set up in RevenueCat
+            buying = true;
+            Grant();
         }, "inapp");
     }
 
     static void RestoreWithRevenueCat()
     {
-        if (!rcReady) return;
+        if (!rcReady) { StoreNotReady(); return; }
         rc.RestorePurchases((info, error) =>
         {
-            if (error != null) { Debug.LogWarning("Restore failed: " + error.Message); return; }
+            if (error != null) { StoreError("Restore failed", error); return; }
             ApplyCustomerInfo(info);
+            RestoreResult();
         });
+    }
+
+    // RevenueCat's code (CONFIGURATION_ERROR, INVALID_CREDENTIALS, ...) points at what's missing in its dashboard.
+    static void StoreError(string title, Purchases.Error e)
+    {
+        Debug.LogWarning(title + ": " + e);
+        Mobile.Alert(title, e.Message + (string.IsNullOrEmpty(e.ReadableErrorCode) ? "" : " (" + e.ReadableErrorCode + ")"));
     }
 
     // The entitlement is the source of truth; owning the product also counts, in case the entitlement isn't set up yet.

@@ -13,6 +13,7 @@ public static class Mobile
 #if UNITY_IOS && !UNITY_EDITOR
     [System.Runtime.InteropServices.DllImport("__Internal")] static extern void MV_Haptic(int style);
     [System.Runtime.InteropServices.DllImport("__Internal")] static extern void MV_Share(string text);
+    [System.Runtime.InteropServices.DllImport("__Internal")] static extern void MV_Alert(string title, string message);
     [System.Runtime.InteropServices.DllImport("__Internal")] static extern void MV_AudioPlayback();
     [System.Runtime.InteropServices.DllImport("__Internal")] static extern void MV_NotifyRequest();
     [System.Runtime.InteropServices.DllImport("__Internal")] static extern void MV_NotifySchedule(string id, string title, string body, int seconds);
@@ -130,6 +131,29 @@ public static class Mobile
         MV_Share(text);
 #else
         GUIUtility.systemCopyBuffer = text;
+#endif
+    }
+
+    // A system alert with an OK button on iOS, a long toast on Android (store results: purchase failed, restored).
+    public static void Alert(string title, string message)
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            var activity = Activity;
+            activity.Call("runOnUiThread", new AndroidJavaRunnable(() =>
+            {
+                using (var toast = new AndroidJavaClass("android.widget.Toast"))
+                using (var text = new AndroidJavaObject("java.lang.String", title + ": " + message))
+                using (var t = toast.CallStatic<AndroidJavaObject>("makeText", activity, text, toast.GetStatic<int>("LENGTH_LONG")))
+                    t.Call("show");
+            }));
+        }
+        catch (System.Exception e) { Debug.LogWarning("Alert failed: " + e.Message); }
+#elif UNITY_IOS && !UNITY_EDITOR
+        MV_Alert(title, message);
+#else
+        Debug.Log(title + ": " + message);
 #endif
     }
 
